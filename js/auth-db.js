@@ -1,5 +1,5 @@
 /**
- * CuidadoSync - Autenticación Segura y Base de Datos de Turnos y Vida Personal
+ * AntiTurno - Autenticación Segura y Base de Datos de Turnos y Vida Personal
  * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico)
  * Almacenamiento persistente multi-usuario aislado por ID.
  * CRUD completo de Turnos Clínicos y Compromisos Personales / Autocuidado.

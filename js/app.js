@@ -1,5 +1,5 @@
 /**
- * CuidadoSync - Controlador Principal de la Aplicación
+ * AntiTurno - Controlador Principal de la Aplicación
  * Conecta UI con AuthDB: Autenticación, Formulario Turnos CRUD, Compromisos Personales CRUD,
  * Protección Anti-Cruces, Calendario Dinámico Unificado, Próximas Guardias y Sincronización .ICS.
  */
@@ -293,7 +293,7 @@ async function handleRegisterSubmit(event) {
     renderHeroCard();
     renderPersonalView();
     renderHoursSummary();
-    showToast('¡Cuenta creada con éxito! Bienvenido(a) a CuidadoSync.', 'success');
+    showToast('¡Cuenta creada con éxito! Bienvenido(a) a AntiTurno.', 'success');
   } catch (error) {
     if (errBox) {
       errBox.innerText = error.message;
@@ -1272,7 +1272,7 @@ function renderHeroCard() {
             <span class="material-symbols-outlined text-3xl">clinical_notes</span>
           </div>
           <div>
-            <h2 class="font-headline-md text-headline-md text-on-surface font-bold">¡Bienvenida(o) a CuidadoSync!</h2>
+            <h2 class="font-headline-md text-headline-md text-on-surface font-bold">¡Bienvenida(o) a AntiTurno!</h2>
             <p class="font-body-md text-body-md text-on-surface-variant">Inicia sesión para ver tu próximo turno y descansos regulados.</p>
           </div>
         </div>
@@ -1465,10 +1465,10 @@ function exportCalendarICS() {
   let icsContent = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//CuidadoSync//Turnos Para Enfermeros//ES',
+    'PRODID:-//AntiTurno//Turnos Para Enfermeros//ES',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:CuidadoSync - Turnos y Descansos'
+    'X-WR-CALNAME:AntiTurno - Turnos y Descansos'
   ];
 
   // Helper formato fecha ICS YYYYMMDDTHHMMSS
@@ -1496,7 +1496,7 @@ function exportCalendarICS() {
     }
 
     icsContent.push('BEGIN:VEVENT');
-    icsContent.push(`UID:shift-${s.id}@cuidadosync.app`);
+    icsContent.push(`UID:shift-${s.id}@antiturno.app`);
     icsContent.push(`DTSTAMP:${formatICSDate(formatLocalDate(new Date()), '00:00')}Z`);
     icsContent.push(`DTSTART:${formatICSDate(s.date, s.startTime)}`);
     icsContent.push(`DTEND:${formatICSDate(endDateStr, s.endTime)}`);
@@ -1510,7 +1510,7 @@ function exportCalendarICS() {
   commitments.forEach(c => {
     const cat = COMMITMENT_CATEGORIES[c.category]?.label || 'Compromiso Personal';
     icsContent.push('BEGIN:VEVENT');
-    icsContent.push(`UID:com-${c.id}@cuidadosync.app`);
+    icsContent.push(`UID:com-${c.id}@antiturno.app`);
     icsContent.push(`DTSTAMP:${formatICSDate(formatLocalDate(new Date()), '00:00')}Z`);
     icsContent.push(`DTSTART:${formatICSDate(c.date, c.startTime)}`);
     icsContent.push(`DTEND:${formatICSDate(c.date, c.endTime)}`);
@@ -1526,7 +1526,7 @@ function exportCalendarICS() {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `cuidadosync_calendario_${formatLocalDate(new Date())}.ics`;
+  a.download = `antiturno_calendario_${formatLocalDate(new Date())}.ics`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);

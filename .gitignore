@@ -32,3 +32,5 @@ ENV/
 Thumbs.db
 *.zip
 
+
+.backup_original/
