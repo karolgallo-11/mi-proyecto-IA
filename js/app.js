@@ -1,6 +1,7 @@
 /**
  * CuidadoSync - Controlador Principal de la Aplicación
- * Conecta UI con AuthDB: Autenticación, Formulario CRUD, Calendario Dinámico, Próximas Guardias y Resumen de Horas.
+ * Conecta UI con AuthDB: Autenticación, Formulario Turnos CRUD, Compromisos Personales CRUD,
+ * Protección Anti-Cruces, Calendario Dinámico Unificado, Próximas Guardias y Sincronización .ICS.
  */
 
 // Estado global de la aplicación
@@ -9,20 +10,20 @@ const AppState = {
   calendarDate: new Date(),
   selectedDate: null,
   activeShiftType: 'M',
-  editingShiftId: null
+  editingShiftId: null,
+  activeCategoryFilter: 'all',
+  editingCommitmentId: null,
+  pendingCommitmentData: null
 };
 
 // ==========================================
 // INICIALIZACIÓN
 // ==========================================
 document.addEventListener('DOMContentLoaded', () => {
-  // Inicializar servicio de autenticación
   AuthDB.init();
-
-  // Actualizar UI según estado de sesión
   updateAuthUI();
 
-  // Inicializar fecha por defecto en formulario de turnos
+  // Fecha inicial en formulario de turnos
   const todayStr = formatLocalDate(new Date());
   const dateInput = document.getElementById('shiftDateInput');
   if (dateInput) dateInput.value = todayStr;
@@ -31,14 +32,14 @@ document.addEventListener('DOMContentLoaded', () => {
   renderCalendar();
   renderUpcomingShifts();
   renderHeroCard();
+  renderPersonalView();
   renderHoursSummary();
 
-  // Manejar enrutador inicial según URL hash
+  // Enrutador hash inicial
   const initialHash = window.location.hash.replace('#', '');
   const validViews = ['dashboard', 'registro', 'personal', 'resumen'];
   navigateTo(validViews.includes(initialHash) ? initialHash : 'dashboard');
 
-  // Si no hay usuario autenticado, sugerir inicio de sesión
   if (!AuthDB.getCurrentUser()) {
     setTimeout(() => {
       openAuthModal('login');
@@ -46,7 +47,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 });
 
-// Helper de formato YYYY-MM-DD local
 function formatLocalDate(d) {
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, '0');
@@ -62,7 +62,6 @@ function navigateTo(viewName) {
   if (!views.includes(viewName)) viewName = 'dashboard';
   AppState.currentView = viewName;
 
-  // Cambiar visibilidad de paneles
   views.forEach(v => {
     const panel = document.getElementById('view-' + v);
     if (panel) {
@@ -74,7 +73,7 @@ function navigateTo(viewName) {
     }
   });
 
-  // Estilos de navegación en barra superior (escritorio)
+  // Estilos Desktop
   const desktopLinks = document.querySelectorAll('[data-desktop-nav]');
   desktopLinks.forEach(link => {
     const target = link.getAttribute('data-desktop-nav');
@@ -87,7 +86,7 @@ function navigateTo(viewName) {
     }
   });
 
-  // Estilos de navegación en menú inferior (celular)
+  // Estilos Mobile
   const mobileBtns = document.querySelectorAll('[data-mobile-nav]');
   mobileBtns.forEach(btn => {
     const target = btn.getAttribute('data-mobile-nav');
@@ -98,16 +97,16 @@ function navigateTo(viewName) {
     }
   });
 
-  // Sincronizar hash
   if (window.location.hash !== '#' + viewName) {
     window.location.hash = viewName;
   }
 
-  // Refrescar datos según la vista
   if (viewName === 'dashboard') {
     renderCalendar();
     renderUpcomingShifts();
     renderHeroCard();
+  } else if (viewName === 'personal') {
+    renderPersonalView();
   } else if (viewName === 'resumen') {
     renderHoursSummary();
   }
@@ -145,16 +144,19 @@ function updateAuthUI() {
           <span class="material-symbols-outlined text-on-surface-variant text-lg ml-0.5">expand_more</span>
         </button>
 
-        <!-- Menú desplegable -->
         <div id="userDropdown" class="hidden absolute right-0 mt-2 w-64 bg-surface-container-lowest rounded-2xl shadow-xl border border-outline-variant/40 p-2 z-50 animate-in fade-in">
           <div class="p-3 border-b border-outline-variant/30">
             <p class="font-title-md text-title-md text-on-surface font-bold truncate">${escapeHTML(user.name)}</p>
             <p class="font-body-sm text-body-sm text-on-surface-variant truncate">${escapeHTML(user.email)}</p>
           </div>
           <div class="py-1">
+            <button onclick="openSyncModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
+              <span class="material-symbols-outlined text-primary text-lg">calendar_month</span>
+              <span>Exportar / Sincronizar (.ics)</span>
+            </button>
             <button onclick="openCloudConfigModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
               <span class="material-symbols-outlined text-primary text-lg">cloud_sync</span>
-              <span>Sincronización en la Nube</span>
+              <span>Sincronización Nube (Firebase)</span>
             </button>
             <button onclick="handleLogout()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-error hover:bg-error-container/30 rounded-xl text-sm font-semibold transition-colors mt-1" type="button">
               <span class="material-symbols-outlined text-lg">logout</span>
@@ -179,7 +181,6 @@ function toggleUserDropdown() {
   if (dd) dd.classList.toggle('hidden');
 }
 
-// Cerrar dropdown al hacer clic fuera
 document.addEventListener('click', (e) => {
   const btn = document.getElementById('userMenuBtn');
   const dd = document.getElementById('userDropdown');
@@ -248,6 +249,7 @@ async function handleLoginSubmit(event) {
     renderCalendar();
     renderUpcomingShifts();
     renderHeroCard();
+    renderPersonalView();
     renderHoursSummary();
     showToast('¡Bienvenida(o)! Has iniciado sesión correctamente.', 'success');
   } catch (error) {
@@ -289,6 +291,7 @@ async function handleRegisterSubmit(event) {
     renderCalendar();
     renderUpcomingShifts();
     renderHeroCard();
+    renderPersonalView();
     renderHoursSummary();
     showToast('¡Cuenta creada con éxito! Bienvenido(a) a CuidadoSync.', 'success');
   } catch (error) {
@@ -309,6 +312,7 @@ function handleLogout() {
     renderCalendar();
     renderUpcomingShifts();
     renderHeroCard();
+    renderPersonalView();
     renderHoursSummary();
     showToast('Sesión cerrada correctamente.', 'info');
     navigateTo('dashboard');
@@ -342,24 +346,23 @@ function selectShiftType(type) {
     }
   });
 
-  // Auto-ajustar horarios sugeridos según tipo
   const startInput = document.getElementById('shiftStartTimeInput');
   const endInput = document.getElementById('shiftEndTimeInput');
   if (startInput && endInput) {
     switch (type) {
-      case 'M': // Mañana
+      case 'M':
         startInput.value = '07:00';
         endInput.value = '15:00';
         break;
-      case 'T': // Tarde
+      case 'T':
         startInput.value = '15:00';
         endInput.value = '23:00';
         break;
-      case 'N': // Noche
+      case 'N':
         startInput.value = '23:00';
         endInput.value = '07:00';
         break;
-      case 'G': // Guardia 24h
+      case 'G':
         startInput.value = '08:00';
         endInput.value = '08:00';
         break;
@@ -408,26 +411,18 @@ function handleSaveShift(event) {
       hospital: hospital || 'Hospital Clínico Central',
       service: service || 'UCI Adultos',
       notes: notes || '',
-      reminders: {
-        reminder2h,
-        reminderTupper,
-        reminderRest
-      }
+      reminders: { reminder2h, reminderTupper, reminderRest }
     };
 
-    const saved = AuthDB.saveShift(shiftData);
+    AuthDB.saveShift(shiftData);
     showToast(shiftId ? '¡Turno modificado correctamente!' : '¡Turno guardado con éxito!', 'success');
 
-    // Resetear formulario
     resetShiftForm();
-
-    // Actualizar calendario, próximas guardias y métricas
     renderCalendar();
     renderUpcomingShifts();
     renderHeroCard();
+    renderPersonalView();
     renderHoursSummary();
-
-    // Redirigir a vista de calendario para ver el turno registrado
     navigateTo('dashboard');
   } catch (error) {
     showToast(error.message, 'error');
@@ -443,7 +438,6 @@ function editShift(shiftId) {
 
   AppState.editingShiftId = shift.id;
 
-  // Llenar campos del formulario
   document.getElementById('shiftDateInput').value = shift.date;
   document.getElementById('shiftStartTimeInput').value = shift.startTime;
   document.getElementById('shiftEndTimeInput').value = shift.endTime;
@@ -461,10 +455,8 @@ function editShift(shiftId) {
     document.getElementById('remindRestCheckbox').checked = shift.reminders?.reminderRest ?? true;
   }
 
-  // Activar tipo
   selectShiftType(shift.type || 'M');
 
-  // Ajustar textos e interfaz de edición
   const formTitle = document.getElementById('shiftFormTitle');
   if (formTitle) formTitle.innerText = 'Modificar Turno Asignado';
 
@@ -477,10 +469,7 @@ function editShift(shiftId) {
   const deleteBtn = document.getElementById('deleteShiftBtn');
   if (deleteBtn) deleteBtn.classList.remove('hidden');
 
-  // Cerrar modal de día si estaba abierto
   closeDayDetailsModal();
-
-  // Ir al formulario de registro
   navigateTo('registro');
 }
 
@@ -500,6 +489,7 @@ function handleDeleteShift() {
       renderCalendar();
       renderUpcomingShifts();
       renderHeroCard();
+      renderPersonalView();
       renderHoursSummary();
       navigateTo('dashboard');
     } catch (error) {
@@ -533,7 +523,310 @@ function resetShiftForm() {
 }
 
 // ==========================================
-// CALENDARIO DINÁMICO
+// COMPROMISOS PERSONALES & PROTECCIÓN ANTI-CRUCES
+// ==========================================
+const COMMITMENT_CATEGORIES = {
+  medica: { label: 'Cita Médica / Salud', color: 'bg-cyan-100 text-cyan-900 border-cyan-300', icon: 'medical_services' },
+  estudio: { label: 'Estudio / Formación', color: 'bg-purple-100 text-purple-900 border-purple-300', icon: 'school' },
+  familia: { label: 'Familia & Social', color: 'bg-emerald-100 text-emerald-900 border-emerald-300', icon: 'family_restroom' },
+  diligencias: { label: 'Diligencias / Trámites', color: 'bg-slate-100 text-slate-800 border-slate-300', icon: 'task_alt' },
+  descanso: { label: 'Descanso / Sueño Protegido', color: 'bg-indigo-100 text-indigo-900 border-indigo-300', icon: 'bed' },
+  ejercicio: { label: 'Ejercicio & Deporte', color: 'bg-orange-100 text-orange-900 border-orange-300', icon: 'fitness_center' },
+  otro: { label: 'Otro Compromiso', color: 'bg-pink-100 text-pink-900 border-pink-300', icon: 'bookmark' }
+};
+
+function openCommitmentModal(defaultDate = null, commitmentId = null) {
+  const user = AuthDB.getCurrentUser();
+  if (!user) {
+    openAuthModal('login');
+    showToast('Inicia sesión para gestionar tus compromisos personales.', 'warning');
+    return;
+  }
+
+  const modal = document.getElementById('commitmentModal');
+  const titleElem = document.getElementById('commitmentModalTitle');
+  const conflictBanner = document.getElementById('commitmentConflictBanner');
+  if (conflictBanner) conflictBanner.classList.add('hidden');
+  AppState.pendingCommitmentData = null;
+
+  if (commitmentId) {
+    const com = AuthDB.getCommitmentById(commitmentId);
+    if (!com) {
+      showToast('No se encontró el compromiso personal.', 'error');
+      return;
+    }
+    AppState.editingCommitmentId = com.id;
+    if (titleElem) titleElem.innerText = 'Modificar Compromiso Personal';
+
+    document.getElementById('comTitleInput').value = com.title || '';
+    document.getElementById('comCategorySelect').value = com.category || 'otro';
+    document.getElementById('comDateInput').value = com.date || formatLocalDate(new Date());
+    document.getElementById('comStartTimeInput').value = com.startTime || '10:00';
+    document.getElementById('comEndTimeInput').value = com.endTime || '12:00';
+    document.getElementById('comLocationInput').value = com.location || '';
+    document.getElementById('comNotesInput').value = com.notes || '';
+  } else {
+    AppState.editingCommitmentId = null;
+    if (titleElem) titleElem.innerText = 'Nuevo Compromiso Personal';
+
+    document.getElementById('comTitleInput').value = '';
+    document.getElementById('comCategorySelect').value = 'medica';
+    document.getElementById('comDateInput').value = defaultDate || formatLocalDate(new Date());
+    document.getElementById('comStartTimeInput').value = '10:00';
+    document.getElementById('comEndTimeInput').value = '12:00';
+    document.getElementById('comLocationInput').value = '';
+    document.getElementById('comNotesInput').value = '';
+  }
+
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeCommitmentModal() {
+  const modal = document.getElementById('commitmentModal');
+  if (modal) modal.classList.add('hidden');
+  AppState.editingCommitmentId = null;
+  AppState.pendingCommitmentData = null;
+}
+
+function handleSaveCommitment(event, forceSave = false) {
+  if (event) event.preventDefault();
+
+  const user = AuthDB.getCurrentUser();
+  if (!user) {
+    openAuthModal('login');
+    return;
+  }
+
+  let commitmentData = null;
+  if (forceSave && AppState.pendingCommitmentData) {
+    commitmentData = AppState.pendingCommitmentData;
+  } else {
+    const title = document.getElementById('comTitleInput').value;
+    const category = document.getElementById('comCategorySelect').value;
+    const date = document.getElementById('comDateInput').value;
+    const startTime = document.getElementById('comStartTimeInput').value;
+    const endTime = document.getElementById('comEndTimeInput').value;
+    const location = document.getElementById('comLocationInput').value;
+    const notes = document.getElementById('comNotesInput').value;
+
+    if (!title || title.trim().length === 0) {
+      showToast('Por favor escribe un título para el compromiso.', 'error');
+      return;
+    }
+    if (!date) {
+      showToast('Por favor selecciona la fecha.', 'error');
+      return;
+    }
+    if (!startTime || !endTime) {
+      showToast('Por favor especifica hora de inicio y fin.', 'error');
+      return;
+    }
+
+    commitmentData = {
+      id: AppState.editingCommitmentId,
+      title,
+      category,
+      date,
+      startTime,
+      endTime,
+      location,
+      notes
+    };
+
+    // ALGORITMO PROTECCIÓN ANTI-CRUCES
+    const conflict = AuthDB.checkConflict(date, startTime, endTime, AppState.editingCommitmentId);
+    if (conflict.hasConflict) {
+      AppState.pendingCommitmentData = commitmentData;
+      const banner = document.getElementById('commitmentConflictBanner');
+      const bannerTitle = document.getElementById('conflictBannerTitle');
+      const bannerMsg = document.getElementById('conflictBannerMessage');
+
+      if (banner && bannerTitle && bannerMsg) {
+        bannerTitle.innerText = conflict.title;
+        bannerMsg.innerText = conflict.message;
+        banner.classList.remove('hidden');
+        banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+      return; // Esperar decisión del usuario
+    }
+  }
+
+  try {
+    AuthDB.saveCommitment(commitmentData);
+    showToast(commitmentData.id ? '¡Compromiso modificado con éxito!' : '¡Compromiso personal guardado con éxito!', 'success');
+    closeCommitmentModal();
+    renderPersonalView();
+    renderCalendar();
+
+    if (AppState.selectedDate) {
+      openDayDetailsModal(AppState.selectedDate);
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+function editCommitment(id) {
+  openCommitmentModal(null, id);
+}
+
+function handleDeleteCommitment(id) {
+  if (confirm('¿Deseas eliminar este compromiso personal?')) {
+    try {
+      AuthDB.deleteCommitment(id);
+      showToast('Compromiso eliminado correctamente.', 'success');
+      renderPersonalView();
+      renderCalendar();
+      if (AppState.selectedDate) {
+        openDayDetailsModal(AppState.selectedDate);
+      }
+    } catch (err) {
+      showToast(err.message, 'error');
+    }
+  }
+}
+
+function filterCommitments(category) {
+  AppState.activeCategoryFilter = category;
+  renderPersonalView();
+}
+
+function renderPersonalView() {
+  const container = document.getElementById('personalCommitmentsList');
+  if (!container) return;
+
+  const user = AuthDB.getCurrentUser();
+  if (!user) {
+    container.innerHTML = `
+      <div class="p-8 rounded-2xl bg-surface-container-low text-center">
+        <span class="material-symbols-outlined text-4xl text-outline-variant mb-2">lock</span>
+        <h3 class="font-headline-md text-lg font-bold text-on-surface">Inicia sesión para gestionar tu vida personal</h3>
+        <p class="text-xs text-on-surface-variant mt-1 mb-4">Guarda tus citas médicas, estudio y descansos de manera privada.</p>
+        <button onclick="openAuthModal('login')" class="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold shadow-xs">
+          Iniciar Sesión
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  const allCommitments = AuthDB.getCommitments();
+  const filter = AppState.activeCategoryFilter;
+  const filtered = filter === 'all' ? allCommitments : allCommitments.filter(c => c.category === filter);
+
+  // Actualizar métricas
+  const totalElem = document.getElementById('personalTotalCount');
+  if (totalElem) totalElem.innerText = allCommitments.length;
+
+  // Calcular horas de autocuidado este mes
+  const currentMonthIdx = new Date().getMonth();
+  const currentYear = new Date().getFullYear();
+  let totalPersonalHours = 0;
+  let conflictCount = 0;
+
+  allCommitments.forEach(c => {
+    const d = new Date(c.date + 'T00:00:00');
+    if (d.getMonth() === currentMonthIdx && d.getFullYear() === currentYear) {
+      totalPersonalHours += AuthDB.calculateShiftHours(c.startTime, c.endTime);
+    }
+    const conf = AuthDB.checkConflict(c.date, c.startTime, c.endTime, c.id);
+    if (conf.hasConflict) conflictCount++;
+  });
+
+  const hoursElem = document.getElementById('personalHoursCount');
+  if (hoursElem) hoursElem.innerText = totalPersonalHours.toFixed(1) + 'h';
+
+  const conflictBadge = document.getElementById('personalConflictCountBadge');
+  if (conflictBadge) {
+    conflictBadge.innerText = conflictCount > 0 ? `${conflictCount} cruce(s) detectado(s)` : 'Sin cruces activos';
+    conflictBadge.className = conflictCount > 0 ? 'text-xs font-bold text-amber-700 bg-amber-100 px-2.5 py-1 rounded-full' : 'text-xs font-bold text-primary bg-primary-fixed px-2.5 py-1 rounded-full';
+  }
+
+  // Actualizar botones de filtro
+  const filterBtns = document.querySelectorAll('.cat-filter-btn');
+  filterBtns.forEach(btn => {
+    const cat = btn.getAttribute('data-cat-filter');
+    if (cat === filter) {
+      btn.className = 'cat-filter-btn px-3 py-1.5 rounded-xl text-xs font-bold bg-primary text-on-primary shadow-xs transition-colors';
+    } else {
+      btn.className = 'cat-filter-btn px-3 py-1.5 rounded-xl text-xs font-semibold bg-surface-container text-on-surface-variant hover:text-on-surface hover:bg-surface-container-high transition-colors';
+    }
+  });
+
+  if (filtered.length === 0) {
+    container.innerHTML = `
+      <div class="p-10 rounded-2xl bg-surface-container-lowest border border-outline-variant/30 text-center flex flex-col items-center">
+        <div class="w-16 h-16 rounded-2xl bg-surface-container flex items-center justify-center text-primary mb-3">
+          <span class="material-symbols-outlined text-3xl">event_note</span>
+        </div>
+        <h4 class="font-headline-md text-lg font-bold text-on-surface">No hay compromisos en esta categoría</h4>
+        <p class="text-xs text-on-surface-variant mt-1 mb-5">Programa citas médicas, tiempo con familia o descanso para proteger tu bienestar.</p>
+        <button onclick="openCommitmentModal()" class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold text-sm shadow-xs flex items-center gap-2">
+          <span class="material-symbols-outlined text-xl">add_circle</span>
+          <span>Nuevo compromiso personal</span>
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-4">';
+  filtered.forEach(c => {
+    const meta = COMMITMENT_CATEGORIES[c.category] || COMMITMENT_CATEGORIES.otro;
+    const duration = AuthDB.calculateShiftHours(c.startTime, c.endTime);
+    const [y, m, d] = c.date.split('-');
+    const formattedDate = `${d}/${m}/${y}`;
+    const conf = AuthDB.checkConflict(c.date, c.startTime, c.endTime, c.id);
+
+    html += `
+      <div class="p-5 rounded-2xl bg-surface-container-lowest border ${conf.hasConflict ? 'border-amber-400 ring-2 ring-amber-300/50' : 'border-outline-variant/30'} shadow-sm flex flex-col justify-between gap-3 hover:shadow-md transition-shadow">
+        <div>
+          <div class="flex items-center justify-between gap-2 mb-2">
+            <span class="${meta.color} px-2.5 py-0.5 rounded-lg text-xs font-bold flex items-center gap-1.5">
+              <span class="material-symbols-outlined text-sm">${meta.icon}</span>
+              <span>${meta.label}</span>
+            </span>
+            <span class="text-xs font-bold text-on-surface-variant">${formattedDate}</span>
+          </div>
+
+          <h3 class="font-headline-md text-base font-bold text-on-surface">${escapeHTML(c.title)}</h3>
+          
+          <div class="flex items-center gap-2 text-xs text-on-surface-variant mt-1.5 font-medium">
+            <span class="material-symbols-outlined text-sm text-primary">schedule</span>
+            <span>${c.startTime} - ${c.endTime} (${duration}h)</span>
+            ${c.location ? `<span class="flex items-center gap-1 ml-2"><span class="material-symbols-outlined text-sm text-primary">pin_drop</span>${escapeHTML(c.location)}</span>` : ''}
+          </div>
+
+          ${c.notes ? `<p class="text-xs text-on-surface-variant mt-2 italic font-serif bg-surface-container-low p-2 rounded-lg">"${escapeHTML(c.notes)}"</p>` : ''}
+
+          ${conf.hasConflict ? `
+            <div class="mt-2.5 p-2.5 rounded-xl bg-amber-50 border border-amber-300 text-amber-900 text-[11px] flex items-start gap-1.5 font-medium">
+              <span class="material-symbols-outlined text-amber-600 text-base shrink-0">warning</span>
+              <span><strong>Aviso de Cruce:</strong> ${conf.message}</span>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant/20">
+          <button onclick="editCommitment('${c.id}')" class="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-bold flex items-center gap-1 transition-colors">
+            <span class="material-symbols-outlined text-sm">edit</span>
+            <span>Editar</span>
+          </button>
+          <button onclick="handleDeleteCommitment('${c.id}')" class="px-3 py-1.5 rounded-lg bg-error-container/40 hover:bg-error-container text-error text-xs font-bold flex items-center gap-1 transition-colors">
+            <span class="material-symbols-outlined text-sm">delete</span>
+            <span>Eliminar</span>
+          </button>
+        </div>
+      </div>
+    `;
+  });
+  html += '</div>';
+
+  container.innerHTML = html;
+}
+
+// ==========================================
+// CALENDARIO DINÁMICO UNIFICADO (TURNOS + COMPROMISOS)
 // ==========================================
 const MONTH_NAMES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -550,30 +843,26 @@ function renderCalendar() {
 
   monthTitle.innerText = `${MONTH_NAMES[month]} ${year}`;
 
-  // Días del mes actual
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
   const totalDays = lastDayOfMonth.getDate();
 
-  // Día de la semana en que inicia el mes (0 = Domingo, 1 = Lunes en España/Latam: normalizar para que 0 sea Lunes)
   let startDayOfWeek = firstDayOfMonth.getDay() - 1;
-  if (startDayOfWeek === -1) startDayOfWeek = 6; // Domingo
+  if (startDayOfWeek === -1) startDayOfWeek = 6;
 
-  // Turnos del usuario
   const user = AuthDB.getCurrentUser();
   const shifts = user ? AuthDB.getShifts() : [];
+  const commitments = user ? AuthDB.getCommitments() : [];
 
   let html = '';
 
-  // 1. Días de relleno del mes anterior
+  // 1. Días del mes anterior
   const prevMonthLastDay = new Date(year, month, 0).getDate();
   for (let i = startDayOfWeek - 1; i >= 0; i--) {
     const dayNum = prevMonthLastDay - i;
     html += `
       <div class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl bg-surface-container-lowest/40 opacity-40 flex flex-col justify-between border border-outline-variant/10">
-        <div class="flex items-center justify-between">
-          <span class="font-label-md text-label-md font-semibold text-on-surface-variant">${dayNum}</span>
-        </div>
+        <span class="font-label-md text-label-md font-semibold text-on-surface-variant">${dayNum}</span>
       </div>
     `;
   }
@@ -586,13 +875,20 @@ function renderCalendar() {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
     const isToday = isCurrentMonth && today.getDate() === day;
     const dayShifts = shifts.filter(s => s.date === dateStr);
+    const dayCommitments = commitments.filter(c => c.date === dateStr);
 
-    let shiftBadgesHtml = '';
+    let badgesHtml = '';
+    // Badges de Turnos
     dayShifts.forEach(s => {
-      shiftBadgesHtml += getShiftBadgeHtml(s);
+      badgesHtml += getShiftBadgeHtml(s);
+    });
+    // Badges de Compromisos Personales
+    dayCommitments.forEach(c => {
+      badgesHtml += getCommitmentBadgeHtml(c);
     });
 
     const isWeekend = (startDayOfWeek + day - 1) % 7 >= 5;
+    const totalEvents = dayShifts.length + dayCommitments.length;
 
     html += `
       <div onclick="openDayDetailsModal('${dateStr}')" 
@@ -601,25 +897,25 @@ function renderCalendar() {
           <span class="font-label-md text-label-md font-bold ${isToday ? 'text-primary' : (isWeekend ? 'text-primary/80 font-bold' : 'text-on-surface')}">${day}</span>
           ${isToday ? '<span class="px-1.5 py-0.5 rounded-full bg-primary text-on-primary text-[9px] font-bold uppercase tracking-wider">Hoy</span>' : ''}
         </div>
+        
         <div class="flex flex-col gap-1 my-1 overflow-hidden">
-          ${shiftBadgesHtml}
+          ${badgesHtml}
         </div>
+
         <div class="flex items-center justify-end">
-          ${dayShifts.length === 0 ? '<span class="material-symbols-outlined text-outline-variant/50 text-sm hover:text-primary transition-colors" title="Agregar turno">+</span>' : `<span class="text-[10px] text-on-surface-variant font-medium">${dayShifts.length} turno${dayShifts.length > 1 ? 's' : ''}</span>`}
+          ${totalEvents === 0 ? '<span class="text-outline-variant/50 text-xs hover:text-primary font-bold">+</span>' : `<span class="text-[10px] text-on-surface-variant font-medium">${totalEvents} act.</span>`}
         </div>
       </div>
     `;
   }
 
-  // 3. Días de relleno del mes siguiente
+  // 3. Días del mes siguiente
   const totalRendered = startDayOfWeek + totalDays;
   const nextDays = (7 - (totalRendered % 7)) % 7;
   for (let day = 1; day <= nextDays; day++) {
     html += `
       <div class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl bg-surface-container-lowest/40 opacity-40 flex flex-col justify-between border border-outline-variant/10">
-        <div class="flex items-center justify-between">
-          <span class="font-label-md text-label-md font-semibold text-on-surface-variant">${day}</span>
-        </div>
+        <span class="font-label-md text-label-md font-semibold text-on-surface-variant">${day}</span>
       </div>
     `;
   }
@@ -660,9 +956,19 @@ function getShiftBadgeHtml(shift) {
   }
 
   return `
-    <div class="${badgeClasses} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[11px] font-semibold truncate shadow-xs">
+    <div class="${badgeClasses} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[11px] font-semibold truncate shadow-xs" title="${escapeHTML(label)}">
       <span class="material-symbols-outlined text-[13px] shrink-0">${icon}</span>
       <span class="truncate">${escapeHTML(label)}</span>
+    </div>
+  `;
+}
+
+function getCommitmentBadgeHtml(com) {
+  const meta = COMMITMENT_CATEGORIES[com.category] || COMMITMENT_CATEGORIES.otro;
+  return `
+    <div class="${meta.color} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[10px] font-semibold truncate shadow-xs border" title="${escapeHTML(com.title)} (${com.startTime})">
+      <span class="material-symbols-outlined text-[12px] shrink-0">${meta.icon}</span>
+      <span class="truncate">${escapeHTML(com.title)}</span>
     </div>
   `;
 }
@@ -683,7 +989,7 @@ function currentMonth() {
 }
 
 // ==========================================
-// DETALLE DE DÍA (CONSULTAR, EDITAR, ELIMINAR)
+// DETALLE DE DÍA (TURNOS + COMPROMISOS)
 // ==========================================
 function openDayDetailsModal(dateStr) {
   AppState.selectedDate = dateStr;
@@ -702,7 +1008,7 @@ function openDayDetailsModal(dateStr) {
     content.innerHTML = `
       <div class="text-center py-8">
         <span class="material-symbols-outlined text-4xl text-outline-variant mb-2">lock</span>
-        <p class="font-title-md text-title-md text-on-surface font-semibold">Inicia sesión para gestionar turnos</p>
+        <p class="font-title-md text-title-md text-on-surface font-semibold">Inicia sesión para gestionar tu agenda</p>
         <button onclick="closeDayDetailsModal(); openAuthModal('login');" class="mt-4 px-4 py-2 rounded-xl bg-primary text-on-primary font-bold shadow-xs">
           Iniciar Sesión
         </button>
@@ -713,23 +1019,32 @@ function openDayDetailsModal(dateStr) {
   }
 
   const shifts = AuthDB.getShiftsForDate(dateStr);
+  const commitments = AuthDB.getCommitmentsForDate(dateStr);
+
+  let html = '<div class="flex flex-col gap-6">';
+
+  // 1. SECCIÓN TURNOS CLÍNICOS
+  html += `
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between pb-1 border-b border-outline-variant/30">
+        <h4 class="font-headline-md text-sm font-bold text-primary uppercase tracking-wider flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-base">local_hospital</span>
+          <span>Turnos Clínicos (${shifts.length})</span>
+        </h4>
+        <button onclick="scheduleShiftOnDate('${dateStr}')" class="text-xs text-primary font-bold hover:underline flex items-center gap-1">
+          <span class="material-symbols-outlined text-sm">add</span> Añadir Turno
+        </button>
+      </div>
+  `;
 
   if (shifts.length === 0) {
-    content.innerHTML = `
-      <div class="text-center py-8 flex flex-col items-center">
-        <div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center text-on-surface-variant mb-3">
-          <span class="material-symbols-outlined text-3xl">event_busy</span>
-        </div>
-        <p class="font-title-md text-title-md text-on-surface font-semibold">No tienes turnos programados en este día</p>
-        <p class="font-body-sm text-body-sm text-on-surface-variant mt-1 mb-5">Día libre o periodo de descanso clínico.</p>
-        <button onclick="scheduleShiftOnDate('${dateStr}')" class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold flex items-center gap-2 shadow-xs transition-all">
-          <span class="material-symbols-outlined">add_circle</span>
-          <span>Programar Turno Aquí</span>
-        </button>
+    html += `
+      <div class="p-3.5 rounded-xl bg-surface-container-low text-xs text-on-surface-variant flex items-center justify-between">
+        <span>Sin turnos clínicos programados en este día.</span>
+        <button onclick="scheduleShiftOnDate('${dateStr}')" class="text-primary font-bold hover:underline">Programar</button>
       </div>
     `;
   } else {
-    let listHtml = '<div class="flex flex-col gap-3">';
     shifts.forEach(s => {
       let typeLabel = 'Mañana';
       let icon = 'wb_sunny';
@@ -740,51 +1055,98 @@ function openDayDetailsModal(dateStr) {
 
       const duration = AuthDB.calculateShiftHours(s.startTime, s.endTime);
 
-      listHtml += `
-        <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div class="flex items-start gap-3">
-            <div class="w-12 h-12 rounded-xl ${colorPill} flex items-center justify-center shrink-0">
-              <span class="material-symbols-outlined text-2xl">${icon}</span>
+      html += `
+        <div class="p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl ${colorPill} flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">${icon}</span>
             </div>
             <div>
-              <div class="flex items-center gap-2">
-                <span class="${colorPill} px-2 py-0.5 rounded-md font-label-sm text-[10px] font-bold uppercase tracking-wider">${typeLabel}</span>
-                <span class="font-body-sm text-body-sm font-semibold text-on-surface">${s.startTime} - ${s.endTime} (${duration}h)</span>
+              <div class="flex items-center gap-1.5">
+                <span class="${colorPill} px-2 py-0.2 rounded font-label-sm text-[10px] font-bold uppercase">${typeLabel}</span>
+                <span class="text-xs font-bold text-on-surface">${s.startTime} - ${s.endTime} (${duration}h)</span>
               </div>
-              <p class="font-title-md text-title-md text-on-surface font-bold mt-1">${escapeHTML(s.service || 'UCI Adultos')} - ${escapeHTML(s.hospital || 'Hospital')}</p>
-              ${s.notes ? `<p class="font-body-sm text-body-sm text-on-surface-variant mt-1 italic font-serif">"${escapeHTML(s.notes)}"</p>` : ''}
+              <p class="text-xs text-on-surface font-semibold mt-0.5">${escapeHTML(s.service || 'UCI')} • ${escapeHTML(s.hospital || 'Hospital')}</p>
             </div>
           </div>
-          <div class="flex items-center gap-2 w-full sm:w-auto justify-end pt-2 sm:pt-0 border-t sm:border-t-0 border-outline-variant/20">
-            <button onclick="editShift('${s.id}')" class="px-3 py-1.5 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-title-md text-title-md flex items-center gap-1 transition-colors">
+          <div class="flex items-center gap-1">
+            <button onclick="editShift('${s.id}')" class="p-1.5 rounded-lg hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors" title="Editar turno">
               <span class="material-symbols-outlined text-base">edit</span>
-              <span>Editar</span>
             </button>
-            <button onclick="confirmDeleteFromModal('${s.id}')" class="px-3 py-1.5 rounded-lg bg-error-container/40 hover:bg-error-container text-error font-title-md text-title-md flex items-center gap-1 transition-colors">
+            <button onclick="confirmDeleteFromModal('${s.id}')" class="p-1.5 rounded-lg hover:bg-error-container text-on-surface-variant hover:text-error transition-colors" title="Eliminar turno">
               <span class="material-symbols-outlined text-base">delete</span>
-              <span>Eliminar</span>
             </button>
           </div>
         </div>
       `;
     });
-    listHtml += '</div>';
+  }
+  html += '</div>';
 
-    listHtml += `
-      <div class="mt-4 pt-3 border-t border-outline-variant/30 flex justify-between items-center">
-        <button onclick="scheduleShiftOnDate('${dateStr}')" class="px-4 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-primary font-bold flex items-center gap-1.5 transition-colors">
-          <span class="material-symbols-outlined text-lg">add</span>
-          <span>Añadir Otro Turno</span>
-        </button>
-        <button onclick="closeDayDetailsModal()" class="px-4 py-2 rounded-xl bg-surface-container text-on-surface font-medium hover:bg-surface-container-high transition-colors">
-          Cerrar
+  // 2. SECCIÓN COMPROMISOS PERSONALES
+  html += `
+    <div class="flex flex-col gap-3">
+      <div class="flex items-center justify-between pb-1 border-b border-outline-variant/30">
+        <h4 class="font-headline-md text-sm font-bold text-tertiary uppercase tracking-wider flex items-center gap-1.5">
+          <span class="material-symbols-outlined text-base">self_improvement</span>
+          <span>Vida Personal & Autocuidado (${commitments.length})</span>
+        </h4>
+        <button onclick="closeDayDetailsModal(); openCommitmentModal('${dateStr}')" class="text-xs text-tertiary font-bold hover:underline flex items-center gap-1">
+          <span class="material-symbols-outlined text-sm">add</span> Nuevo compromiso
         </button>
       </div>
+  `;
+
+  if (commitments.length === 0) {
+    html += `
+      <div class="p-3.5 rounded-xl bg-surface-container-low text-xs text-on-surface-variant flex items-center justify-between">
+        <span>Sin compromisos personales registrados.</span>
+        <button onclick="closeDayDetailsModal(); openCommitmentModal('${dateStr}')" class="text-tertiary font-bold hover:underline">Registrar Cita o Descanso</button>
+      </div>
     `;
+  } else {
+    commitments.forEach(c => {
+      const meta = COMMITMENT_CATEGORIES[c.category] || COMMITMENT_CATEGORIES.otro;
+      const duration = AuthDB.calculateShiftHours(c.startTime, c.endTime);
 
-    content.innerHTML = listHtml;
+      html += `
+        <div class="p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-between gap-3 shadow-xs">
+          <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl ${meta.color} flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">${meta.icon}</span>
+            </div>
+            <div>
+              <div class="flex items-center gap-1.5">
+                <span class="${meta.color} px-2 py-0.2 rounded font-label-sm text-[10px] font-bold uppercase">${meta.label}</span>
+                <span class="text-xs font-bold text-on-surface">${c.startTime} - ${c.endTime} (${duration}h)</span>
+              </div>
+              <p class="text-xs text-on-surface font-bold mt-0.5">${escapeHTML(c.title)}</p>
+              ${c.location ? `<p class="text-[11px] text-on-surface-variant flex items-center gap-0.5"><span class="material-symbols-outlined text-xs">pin_drop</span>${escapeHTML(c.location)}</p>` : ''}
+            </div>
+          </div>
+          <div class="flex items-center gap-1">
+            <button onclick="closeDayDetailsModal(); editCommitment('${c.id}')" class="p-1.5 rounded-lg hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors" title="Editar compromiso">
+              <span class="material-symbols-outlined text-base">edit</span>
+            </button>
+            <button onclick="handleDeleteCommitment('${c.id}')" class="p-1.5 rounded-lg hover:bg-error-container text-on-surface-variant hover:text-error transition-colors" title="Eliminar compromiso">
+              <span class="material-symbols-outlined text-base">delete</span>
+            </button>
+          </div>
+        </div>
+      `;
+    });
   }
+  html += '</div>';
 
+  html += `
+    <div class="pt-3 border-t border-outline-variant/30 flex justify-end">
+      <button onclick="closeDayDetailsModal()" class="px-5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-bold transition-colors">
+        Cerrar
+      </button>
+    </div>
+  </div>`;
+
+  content.innerHTML = html;
   modal.classList.remove('hidden');
 }
 
@@ -808,6 +1170,7 @@ function confirmDeleteFromModal(shiftId) {
       renderCalendar();
       renderUpcomingShifts();
       renderHeroCard();
+      renderPersonalView();
       renderHoursSummary();
       openDayDetailsModal(AppState.selectedDate);
     } catch (e) {
@@ -894,7 +1257,7 @@ function renderUpcomingShifts() {
 }
 
 // ==========================================
-// HERO STATUS CARD (CUENTA REGRESIVA PRÓXIMO TURNO)
+// HERO STATUS CARD
 // ==========================================
 function renderHeroCard() {
   const heroContainer = document.getElementById('heroNextShiftCard');
@@ -947,7 +1310,6 @@ function renderHeroCard() {
     return;
   }
 
-  // Calcular tiempo restante
   const now = new Date();
   const shiftStart = new Date(`${nextShift.date}T${nextShift.startTime || '00:00'}:00`);
   const diffMs = shiftStart - now;
@@ -1015,7 +1377,6 @@ function renderHeroCard() {
 function renderHoursSummary() {
   const summary = AuthDB.getHoursSummary(AppState.calendarDate.getFullYear(), AppState.calendarDate.getMonth());
 
-  // KPIs
   const totalHoursElem = document.getElementById('summaryTotalHours');
   if (totalHoursElem) totalHoursElem.innerText = summary.totalHours.toFixed(1);
 
@@ -1028,7 +1389,6 @@ function renderHoursSummary() {
   const shiftsCountElem = document.getElementById('summaryShiftCount');
   if (shiftsCountElem) shiftsCountElem.innerText = summary.shiftCount;
 
-  // Actualizar tabla detallada de jornadas
   const tableBody = document.getElementById('rosterTableBody');
   if (tableBody) {
     const user = AuthDB.getCurrentUser();
@@ -1071,6 +1431,118 @@ function renderHoursSummary() {
       tableBody.innerHTML = rowsHtml;
     }
   }
+}
+
+// ==========================================
+// SINCRONIZACIÓN HONESTA & EXPORTACIÓN .ICS
+// ==========================================
+function openSyncModal() {
+  const modal = document.getElementById('syncCalendarModal');
+  if (modal) modal.classList.remove('hidden');
+}
+
+function closeSyncModal() {
+  const modal = document.getElementById('syncCalendarModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function exportCalendarICS() {
+  const user = AuthDB.getCurrentUser();
+  if (!user) {
+    showToast('Inicia sesión para exportar tu calendario.', 'warning');
+    return;
+  }
+
+  const shifts = AuthDB.getShifts();
+  const commitments = AuthDB.getCommitments();
+
+  if (shifts.length === 0 && commitments.length === 0) {
+    showToast('No tienes eventos ni turnos para exportar.', 'info');
+    return;
+  }
+
+  // Generación estándar formato iCalendar (.ics)
+  let icsContent = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//CuidadoSync//Turnos Para Enfermeros//ES',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'X-WR-CALNAME:CuidadoSync - Turnos y Descansos'
+  ];
+
+  // Helper formato fecha ICS YYYYMMDDTHHMMSS
+  function formatICSDate(dateStr, timeStr) {
+    const cleanDate = dateStr.replace(/-/g, '');
+    const cleanTime = (timeStr || '00:00').replace(/:/g, '') + '00';
+    return `${cleanDate}T${cleanTime}`;
+  }
+
+  // 1. Exportar Turnos
+  shifts.forEach(s => {
+    let typeName = 'Turno Mañana';
+    if (s.type === 'T') typeName = 'Turno Tarde';
+    if (s.type === 'N') typeName = 'Turno Noche';
+    if (s.type === 'G') typeName = 'Guardia 24h';
+
+    // Manejar paso de medianoche
+    let endDateStr = s.date;
+    const [h1] = s.startTime.split(':').map(Number);
+    const [h2] = s.endTime.split(':').map(Number);
+    if (h2 <= h1) {
+      const d = new Date(s.date + 'T00:00:00');
+      d.setDate(d.getDate() + 1);
+      endDateStr = d.toISOString().split('T')[0];
+    }
+
+    icsContent.push('BEGIN:VEVENT');
+    icsContent.push(`UID:shift-${s.id}@cuidadosync.app`);
+    icsContent.push(`DTSTAMP:${formatICSDate(formatLocalDate(new Date()), '00:00')}Z`);
+    icsContent.push(`DTSTART:${formatICSDate(s.date, s.startTime)}`);
+    icsContent.push(`DTEND:${formatICSDate(endDateStr, s.endTime)}`);
+    icsContent.push(`SUMMARY:🏥 ${typeName} (${s.service || 'UCI'})`);
+    icsContent.push(`DESCRIPTION:${escapeICS(s.hospital || 'Hospital')} - ${escapeICS(s.service || 'UCI')}. Notas: ${escapeICS(s.notes || '')}`);
+    icsContent.push(`LOCATION:${escapeICS(s.hospital || 'Hospital')}`);
+    icsContent.push('END:VEVENT');
+  });
+
+  // 2. Exportar Compromisos Personales
+  commitments.forEach(c => {
+    const cat = COMMITMENT_CATEGORIES[c.category]?.label || 'Compromiso Personal';
+    icsContent.push('BEGIN:VEVENT');
+    icsContent.push(`UID:com-${c.id}@cuidadosync.app`);
+    icsContent.push(`DTSTAMP:${formatICSDate(formatLocalDate(new Date()), '00:00')}Z`);
+    icsContent.push(`DTSTART:${formatICSDate(c.date, c.startTime)}`);
+    icsContent.push(`DTEND:${formatICSDate(c.date, c.endTime)}`);
+    icsContent.push(`SUMMARY:🧘 ${escapeICS(c.title)} [${cat}]`);
+    icsContent.push(`DESCRIPTION:Categoría: ${cat}. Notas: ${escapeICS(c.notes || '')}`);
+    if (c.location) icsContent.push(`LOCATION:${escapeICS(c.location)}`);
+    icsContent.push('END:VEVENT');
+  });
+
+  icsContent.push('END:VCALENDAR');
+
+  const blob = new Blob([icsContent.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `cuidadosync_calendario_${formatLocalDate(new Date())}.ics`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+
+  showToast('¡Archivo .ics descargado! Puedes abrirlo en Google Calendar, iPhone o Outlook.', 'success');
+  closeSyncModal();
+}
+
+function escapeICS(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/\\/g, '\\\\')
+    .replace(/;/g, '\\;')
+    .replace(/,/g, '\\,')
+    .replace(/\n/g, '\\n');
 }
 
 // ==========================================
@@ -1136,12 +1608,10 @@ function showToast(message, type = 'info') {
 
   toastContainer.appendChild(toast);
 
-  // Animación entrada
   requestAnimationFrame(() => {
     toast.classList.remove('translate-y-4', 'opacity-0');
   });
 
-  // Animación salida
   setTimeout(() => {
     toast.classList.add('translate-y-4', 'opacity-0');
     setTimeout(() => {

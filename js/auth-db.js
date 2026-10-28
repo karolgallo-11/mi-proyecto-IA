@@ -1,15 +1,17 @@
 /**
- * CuidadoSync - Autenticación Segura y Base de Datos de Turnos
+ * CuidadoSync - Autenticación Segura y Base de Datos de Turnos y Vida Personal
  * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico)
  * Almacenamiento persistente multi-usuario aislado por ID.
+ * CRUD completo de Turnos Clínicos y Compromisos Personales / Autocuidado.
+ * Algoritmo de Detección y Protección Anti-Cruces (Turnos vs Compromisos vs Descanso post-guardia).
  * Compatible con HTTPS (GitHub Pages), localhost y apertura local file://.
- * Soporte opcional para sincronización en la nube con Firebase Firestore.
  */
 
 class AuthDBService {
   constructor() {
     this.STORAGE_USERS_KEY = 'cuidadosync_users_v1';
     this.STORAGE_SHIFTS_KEY = 'cuidadosync_shifts_v1';
+    this.STORAGE_COMMITMENTS_KEY = 'cuidadosync_commitments_v1';
     this.STORAGE_SESSION_KEY = 'cuidadosync_session_v1';
     this.STORAGE_FIREBASE_KEY = 'cuidadosync_firebase_config_v1';
     this.currentUser = null;
@@ -29,7 +31,6 @@ class AuthDBService {
       window.crypto.getRandomValues(array);
       return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
     }
-    // Fallback aleatorio seguro
     let s = '';
     for (let i = 0; i < 32; i++) {
       s += Math.floor(Math.random() * 16).toString(16);
@@ -38,7 +39,6 @@ class AuthDBService {
   }
 
   async hashPassword(password, salt) {
-    // 1. Camino preferido: Web Crypto API nativo (100.000 iteraciones PBKDF2)
     if (window.crypto && window.crypto.subtle) {
       try {
         const enc = new TextEncoder();
@@ -65,21 +65,17 @@ class AuthDBService {
         const hashArray = Array.from(new Uint8Array(exported));
         return 'pbkdf2_subtle_' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       } catch (e) {
-        console.warn('Web Crypto Subtle no disponible o restringido en este origen, usando motor criptográfico compatible:', e);
+        console.warn('Web Crypto Subtle no disponible o restringido, usando motor criptográfico compatible:', e);
       }
     }
-
-    // 2. Fallback criptográfico SHA-256 con salt (útil en protocolo file:// local)
     return 'sha256_compat_' + this.sha256(salt + ':' + password + ':' + salt);
   }
 
-  // Motor SHA-256 independiente
   sha256(ascii) {
     function rightRotate(value, amount) {
       return (value >>> amount) | (value << (32 - amount));
     }
     const mathPow = Math.pow;
-    const maxWord = mathPow(2, 32);
     let result = '';
     const words = [];
     const asciiBitLength = ascii.length * 8;
@@ -417,6 +413,212 @@ class AuthDBService {
     this.deleteShiftFromFirebase(shiftId);
 
     return deleted;
+  }
+
+  // ==========================================
+  // GESTIÓN DE COMPROMISOS PERSONALES (CRUD)
+  // ==========================================
+  getAllCommitmentsFromStorage() {
+    try {
+      const data = localStorage.getItem(this.STORAGE_COMMITMENTS_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch (e) {
+      console.error('Error al leer compromisos de localStorage:', e);
+      return [];
+    }
+  }
+
+  saveAllCommitmentsToStorage(commitments) {
+    localStorage.setItem(this.STORAGE_COMMITMENTS_KEY, JSON.stringify(commitments));
+  }
+
+  getCommitments() {
+    const user = this.getCurrentUser();
+    if (!user) return [];
+    const all = this.getAllCommitmentsFromStorage();
+    return all
+      .filter(c => c.userId === user.id)
+      .sort((a, b) => {
+        const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`);
+        const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`);
+        return dateA - dateB;
+      });
+  }
+
+  getCommitmentById(id) {
+    const user = this.getCurrentUser();
+    if (!user) return null;
+    const all = this.getAllCommitmentsFromStorage();
+    return all.find(c => c.id === id && c.userId === user.id) || null;
+  }
+
+  getCommitmentsForDate(dateStr) {
+    const user = this.getCurrentUser();
+    if (!user) return [];
+    const commitments = this.getCommitments();
+    return commitments.filter(c => c.date === dateStr);
+  }
+
+  saveCommitment(commitmentData) {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('Debes iniciar sesión para registrar compromisos personales.');
+    }
+
+    if (!commitmentData.title || commitmentData.title.trim().length === 0) {
+      throw new Error('Por favor escribe un título para el compromiso.');
+    }
+    if (!commitmentData.date) {
+      throw new Error('Por favor selecciona la fecha del compromiso.');
+    }
+    if (!commitmentData.startTime || !commitmentData.endTime) {
+      throw new Error('Por favor especifica la hora de inicio y de fin.');
+    }
+
+    const all = this.getAllCommitmentsFromStorage();
+    let saved = null;
+
+    if (commitmentData.id) {
+      const idx = all.findIndex(c => c.id === commitmentData.id && c.userId === user.id);
+      if (idx === -1) {
+        throw new Error('El compromiso que intentas modificar no existe o no te pertenece.');
+      }
+      all[idx] = {
+        ...all[idx],
+        title: commitmentData.title.trim(),
+        category: commitmentData.category || 'otro',
+        date: commitmentData.date,
+        startTime: commitmentData.startTime,
+        endTime: commitmentData.endTime,
+        location: commitmentData.location ? commitmentData.location.trim() : '',
+        notes: commitmentData.notes ? commitmentData.notes.trim() : '',
+        updatedAt: new Date().toISOString()
+      };
+      saved = all[idx];
+    } else {
+      saved = {
+        id: 'com_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
+        userId: user.id,
+        title: commitmentData.title.trim(),
+        category: commitmentData.category || 'otro',
+        date: commitmentData.date,
+        startTime: commitmentData.startTime,
+        endTime: commitmentData.endTime,
+        location: commitmentData.location ? commitmentData.location.trim() : '',
+        notes: commitmentData.notes ? commitmentData.notes.trim() : '',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+      all.push(saved);
+    }
+
+    this.saveAllCommitmentsToStorage(all);
+    return saved;
+  }
+
+  deleteCommitment(id) {
+    const user = this.getCurrentUser();
+    if (!user) {
+      throw new Error('Debes iniciar sesión para eliminar compromisos.');
+    }
+
+    const all = this.getAllCommitmentsFromStorage();
+    const idx = all.findIndex(c => c.id === id && c.userId === user.id);
+    if (idx === -1) {
+      throw new Error('El compromiso no existe o no te pertenece.');
+    }
+
+    const deleted = all.splice(idx, 1)[0];
+    this.saveAllCommitmentsToStorage(all);
+    return deleted;
+  }
+
+  // ==========================================
+  // PROTECCIÓN ANTI-CRUCES (Algoritmo de Solapamientos)
+  // ==========================================
+  checkConflict(dateStr, startTimeStr, endTimeStr, excludeCommitmentId = null) {
+    const user = this.getCurrentUser();
+    if (!user) return { hasConflict: false };
+
+    // Convertir horario del compromiso a minutos del día
+    const [h1, m1] = startTimeStr.split(':').map(Number);
+    const [h2, m2] = endTimeStr.split(':').map(Number);
+    let cStart = h1 * 60 + m1;
+    let cEnd = h2 * 60 + m2;
+    if (cEnd <= cStart) cEnd += 24 * 60; // Cruza medianoche
+
+    const shifts = this.getShifts();
+
+    // 1. Revisar cruce directo con turnos en la misma fecha
+    for (const s of shifts) {
+      if (s.date === dateStr) {
+        const [sh1, sm1] = s.startTime.split(':').map(Number);
+        const [sh2, sm2] = s.endTime.split(':').map(Number);
+        let sStart = sh1 * 60 + sm1;
+        let sEnd = sh2 * 60 + sm2;
+        if (sEnd <= sStart) sEnd += 24 * 60;
+
+        // Comprobar intersección de intervalos: (startA < endB && startB < endA)
+        if (cStart < sEnd && sStart < cEnd) {
+          let shiftName = 'Turno Clínico';
+          if (s.type === 'M') shiftName = 'Turno Mañana';
+          if (s.type === 'T') shiftName = 'Turno Tarde';
+          if (s.type === 'N') shiftName = 'Turno Noche';
+          if (s.type === 'G') shiftName = 'Guardia 24h';
+
+          return {
+            hasConflict: true,
+            type: 'shift',
+            title: `Cruce Directo con ${shiftName}`,
+            message: `Este compromiso coincide con tu ${shiftName} programado de ${s.startTime} a ${s.endTime} en ${s.hospital || 'Hospital'} (${s.service || 'UCI'}).`,
+            item: s
+          };
+        }
+      }
+
+      // Si el turno era nocturno del día anterior y terminó en la mañana de dateStr
+      const prevDate = new Date(dateStr + 'T00:00:00');
+      prevDate.setDate(prevDate.getDate() - 1);
+      const prevDateStr = prevDate.toISOString().split('T')[0];
+
+      if (s.date === prevDateStr && (s.type === 'N' || s.type === 'G')) {
+        const [sh1, sm1] = s.startTime.split(':').map(Number);
+        const [sh2, sm2] = s.endTime.split(':').map(Number);
+        let sStart = sh1 * 60 + sm1;
+        let sEnd = sh2 * 60 + sm2;
+        if (sEnd <= sStart) {
+          // El turno terminó en dateStr a las sh2:sm2
+          const morningEndMin = sh2 * 60 + sm2;
+          if (cStart < morningEndMin) {
+            return {
+              hasConflict: true,
+              type: 'shift',
+              title: 'Cruce con Guardia Nocturna en Curso',
+              message: `Tu turno nocturno iniciado ayer aún estará activo hasta las ${s.endTime} de esta mañana.`,
+              item: s
+            };
+          }
+
+          // Descanso protegido obligatorio post-noche (8 horas post-salida)
+          const restEndMin = morningEndMin + 8 * 60;
+          if (cStart < restEndMin) {
+            const restEndH = Math.floor(restEndMin / 60);
+            const restEndM = restEndMin % 60;
+            const formattedRestEnd = `${String(restEndH).padStart(2, '0')}:${String(restEndM).padStart(2, '0')}`;
+
+            return {
+              hasConflict: true,
+              type: 'rest',
+              title: 'Solapamiento con Descanso Post-Guardia',
+              message: `Tras salir de tu guardia nocturna a las ${s.endTime}, tu ventana recomendada de descanso y sueño reparador se extiende hasta las ${formattedRestEnd}. Programar actividades aquí puede generar fatiga acumulada.`,
+              item: s
+            };
+          }
+        }
+      }
+    }
+
+    return { hasConflict: false };
   }
 
   // ==========================================
