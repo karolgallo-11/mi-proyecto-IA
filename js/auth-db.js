@@ -1,7 +1,7 @@
 /**
  * AntiTurno - Autenticación Segura y Base de Datos de Turnos y Vida Personal
- * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico)
- * Almacenamiento persistente multi-usuario aislado por ID.
+ * Soporta Firebase Cloud (Auth & Firestore) para persistencia y sincronización entre dispositivos.
+ * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico) para modo local/offline.
  * CRUD completo de Turnos Clínicos y Compromisos Personales / Autocuidado.
  * Algoritmo de Detección y Protección Anti-Cruces (Turnos vs Compromisos vs Descanso post-guardia).
  * Compatible con HTTPS (GitHub Pages), localhost y apertura local file://.
@@ -14,16 +14,199 @@ class AuthDBService {
     this.STORAGE_COMMITMENTS_KEY = 'cuidadosync_commitments_v1';
     this.STORAGE_SESSION_KEY = 'cuidadosync_session_v1';
     this.STORAGE_FIREBASE_KEY = 'cuidadosync_firebase_config_v1';
+    
     this.currentUser = null;
+    this.isFirebaseReady = false;
+    this.firebaseAuth = null;
+    this.firestore = null;
+
     this.init();
   }
 
   init() {
+    this.initFirebase();
     this.checkSession();
   }
 
   // ==========================================
-  // CRIPTOGRAFÍA SEGURA (Web Crypto API + Fallback)
+  // INICIALIZACIÓN Y CONFIGURACIÓN FIREBASE CLOUD
+  // ==========================================
+  initFirebase() {
+    try {
+      const cfg = this.getFirebaseConfig();
+      if (cfg && cfg.apiKey && cfg.projectId && window.firebase && window.firebase.initializeApp) {
+        if (!firebase.apps || !firebase.apps.length) {
+          firebase.initializeApp(cfg);
+        }
+        this.firebaseAuth = firebase.auth();
+        this.firestore = firebase.firestore();
+        this.isFirebaseReady = true;
+
+        // Listener en tiempo real del estado de autenticación de Firebase
+        this.firebaseAuth.onAuthStateChanged(async (fbUser) => {
+          if (fbUser) {
+            let name = fbUser.displayName || fbUser.email.split('@')[0];
+            try {
+              const doc = await this.firestore.collection('users').doc(fbUser.uid).get();
+              if (doc.exists && doc.data() && doc.data().name) {
+                name = doc.data().name;
+              }
+            } catch (e) {
+              console.warn('Error leyendo perfil de usuario en Firestore:', e);
+            }
+
+            this.currentUser = {
+              id: fbUser.uid,
+              name: name,
+              email: fbUser.email
+            };
+
+            this.createSession(this.currentUser, true);
+            await this.pullUserDataFromFirebase(fbUser.uid);
+            window.dispatchEvent(new CustomEvent('antiturno-data-synced'));
+          }
+        });
+      } else {
+        this.isFirebaseReady = false;
+      }
+    } catch (e) {
+      console.warn('Firebase no inicializado (modo local activo):', e);
+      this.isFirebaseReady = false;
+    }
+  }
+
+  getFirebaseConfig() {
+    // 1. Revisar si fue definido en js/firebase-config.js
+    if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.projectId) {
+      return window.FIREBASE_CONFIG;
+    }
+    // 2. Revisar si fue ingresado en la interfaz y guardado en localStorage
+    try {
+      const data = localStorage.getItem(this.STORAGE_FIREBASE_KEY);
+      return data ? JSON.parse(data) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  saveFirebaseConfig(config) {
+    if (!config) {
+      localStorage.removeItem(this.STORAGE_FIREBASE_KEY);
+      this.isFirebaseReady = false;
+    } else {
+      localStorage.setItem(this.STORAGE_FIREBASE_KEY, JSON.stringify(config));
+      this.initFirebase();
+    }
+  }
+
+  // ==========================================
+  // SINCRONIZACIÓN NUBE (DESCARGA Y SUBIDA)
+  // ==========================================
+  async pullUserDataFromFirebase(userId) {
+    if (!this.isFirebaseReady || !this.firestore || !userId) return;
+    try {
+      // 1. Descargar turnos del usuario desde Firestore
+      const shiftsSnap = await this.firestore.collection('users').doc(userId).collection('shifts').get();
+      const remoteShifts = [];
+      shiftsSnap.forEach(doc => {
+        remoteShifts.push(doc.data());
+      });
+
+      if (remoteShifts.length > 0) {
+        // Mantener turnos de otros usuarios locales y reemplazar los de este usuario con los de la nube
+        const otherShifts = this.getAllShiftsFromStorage().filter(s => s.userId !== userId);
+        this.saveAllShiftsToStorage([...otherShifts, ...remoteShifts]);
+      } else {
+        // Si la nube está vacía pero hay turnos locales creados antes de conectar, subirlos a la nube
+        const localShifts = this.getShifts();
+        for (const s of localShifts) {
+          await this.syncShiftToFirebase(s);
+        }
+      }
+
+      // 2. Descargar compromisos personales del usuario desde Firestore
+      const comSnap = await this.firestore.collection('users').doc(userId).collection('commitments').get();
+      const remoteComs = [];
+      comSnap.forEach(doc => {
+        remoteComs.push(doc.data());
+      });
+
+      if (remoteComs.length > 0) {
+        const otherComs = this.getAllCommitmentsFromStorage().filter(c => c.userId !== userId);
+        this.saveAllCommitmentsToStorage([...otherComs, ...remoteComs]);
+      } else {
+        const localComs = this.getCommitments();
+        for (const c of localComs) {
+          await this.syncCommitmentToFirebase(c);
+        }
+      }
+    } catch (err) {
+      console.warn('Error sincronizando datos desde Firestore:', err);
+    }
+  }
+
+  async syncShiftToFirebase(shift) {
+    if (this.isFirebaseReady && this.firestore && this.currentUser && shift) {
+      try {
+        await this.firestore
+          .collection('users')
+          .doc(this.currentUser.id)
+          .collection('shifts')
+          .doc(shift.id)
+          .set(shift, { merge: true });
+      } catch (e) {
+        console.warn('Error guardando turno en Firebase:', e);
+      }
+    }
+  }
+
+  async deleteShiftFromFirebase(shiftId) {
+    if (this.isFirebaseReady && this.firestore && this.currentUser) {
+      try {
+        await this.firestore
+          .collection('users')
+          .doc(this.currentUser.id)
+          .collection('shifts')
+          .doc(shiftId)
+          .delete();
+      } catch (e) {
+        console.warn('Error eliminando turno en Firebase:', e);
+      }
+    }
+  }
+
+  async syncCommitmentToFirebase(commitment) {
+    if (this.isFirebaseReady && this.firestore && this.currentUser && commitment) {
+      try {
+        await this.firestore
+          .collection('users')
+          .doc(this.currentUser.id)
+          .collection('commitments')
+          .doc(commitment.id)
+          .set(commitment, { merge: true });
+      } catch (e) {
+        console.warn('Error guardando compromiso en Firebase:', e);
+      }
+    }
+  }
+
+  async deleteCommitmentFromFirebase(commitmentId) {
+    if (this.isFirebaseReady && this.firestore && this.currentUser) {
+      try {
+        await this.firestore
+          .collection('users')
+          .doc(this.currentUser.id)
+          .collection('commitments')
+          .doc(commitmentId)
+          .delete();
+      } catch (e) {
+        console.warn('Error eliminando compromiso en Firebase:', e);
+      }
+    }
+  }
+
+  // ==========================================
+  // CRIPTOGRAFÍA SEGURA LOCAL (PBKDF2 + SHA-256 Fallback)
   // ==========================================
   generateSalt() {
     if (window.crypto && window.crypto.getRandomValues) {
@@ -65,7 +248,7 @@ class AuthDBService {
         const hashArray = Array.from(new Uint8Array(exported));
         return 'pbkdf2_subtle_' + hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
       } catch (e) {
-        console.warn('Web Crypto Subtle no disponible o restringido, usando motor criptográfico compatible:', e);
+        console.warn('Web Crypto Subtle no disponible, usando motor criptográfico compatible:', e);
       }
     }
     return 'sha256_compat_' + this.sha256(salt + ':' + password + ':' + salt);
@@ -75,10 +258,6 @@ class AuthDBService {
     function rightRotate(value, amount) {
       return (value >>> amount) | (value << (32 - amount));
     }
-    const mathPow = Math.pow;
-    let result = '';
-    const words = [];
-    const asciiBitLength = ascii.length * 8;
     let hash = [
       0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
       0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19
@@ -94,6 +273,8 @@ class AuthDBService {
       0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
     ];
 
+    const words = [];
+    const asciiBitLength = ascii.length * 8;
     let i = 0;
     while (i < ascii.length) {
       words[i >> 2] |= (ascii.charCodeAt(i) & 0xff) << (24 - (i % 4) * 8);
@@ -142,6 +323,7 @@ class AuthDBService {
       hash[7] = (hash[7] + h) | 0;
     }
 
+    let result = '';
     for (let idx = 0; idx < 8; idx++) {
       for (let b = 3; b >= 0; b--) {
         const byte = (hash[idx] >> (b * 8)) & 255;
@@ -181,6 +363,45 @@ class AuthDBService {
       throw new Error('La contraseña debe tener al menos 6 caracteres.');
     }
 
+    // 1. Si Firebase está activo, registrar en la nube
+    if (this.isFirebaseReady && this.firebaseAuth) {
+      try {
+        const cred = await this.firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password);
+        const fbUser = cred.user;
+        await fbUser.updateProfile({ displayName: name.trim() });
+
+        const userData = {
+          id: fbUser.uid,
+          name: name.trim(),
+          email: cleanEmail,
+          createdAt: new Date().toISOString()
+        };
+
+        await this.firestore.collection('users').doc(fbUser.uid).set(userData);
+
+        this.currentUser = userData;
+        this.createSession(userData, true);
+
+        // Subir turnos locales pendientes si existieran
+        const localShifts = this.getAllShiftsFromStorage().filter(s => !s.userId || s.userId === 'local');
+        for (const s of localShifts) {
+          s.userId = fbUser.uid;
+          await this.syncShiftToFirebase(s);
+        }
+
+        return userData;
+      } catch (fbErr) {
+        if (fbErr.code === 'auth/email-already-in-use') {
+          throw new Error('Ya existe una cuenta registrada con este correo en Firebase.');
+        } else if (fbErr.code === 'auth/weak-password') {
+          throw new Error('La contraseña es demasiado débil (mínimo 6 caracteres).');
+        } else {
+          throw new Error(fbErr.message || 'Error al registrar la cuenta en Firebase.');
+        }
+      }
+    }
+
+    // 2. Modo local PBKDF2
     const users = this.getAllUsers();
     if (users.some(u => u.email === cleanEmail)) {
       throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
@@ -202,8 +423,6 @@ class AuthDBService {
     this.saveAllUsers(users);
 
     this.createSession(newUser);
-    this.syncRegisterFirebase(cleanEmail, password);
-
     return this.sanitizeUser(newUser);
   }
 
@@ -213,6 +432,46 @@ class AuthDBService {
       throw new Error('Por favor ingresa correo y contraseña.');
     }
 
+    // 1. Si Firebase está activo, autenticar contra la nube y restaurar datos
+    if (this.isFirebaseReady && this.firebaseAuth) {
+      try {
+        const cred = await this.firebaseAuth.signInWithEmailAndPassword(cleanEmail, password);
+        const fbUser = cred.user;
+
+        let name = fbUser.displayName || cleanEmail.split('@')[0];
+        try {
+          const doc = await this.firestore.collection('users').doc(fbUser.uid).get();
+          if (doc.exists && doc.data() && doc.data().name) {
+            name = doc.data().name;
+          }
+        } catch (e) {}
+
+        const user = {
+          id: fbUser.uid,
+          name: name,
+          email: cleanEmail,
+          createdAt: fbUser.metadata?.creationTime || new Date().toISOString()
+        };
+
+        this.currentUser = user;
+        this.createSession(user, rememberMe);
+
+        // Descargar turnos y compromisos vinculados a esta cuenta desde Firestore
+        await this.pullUserDataFromFirebase(fbUser.uid);
+
+        return user;
+      } catch (fbErr) {
+        if (fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/invalid-credential') {
+          throw new Error('No se encontró ninguna cuenta con este correo o la contraseña es inválida.');
+        } else if (fbErr.code === 'auth/wrong-password') {
+          throw new Error('Contraseña incorrecta. Por favor intenta de nuevo.');
+        } else {
+          throw new Error(fbErr.message || 'Error al iniciar sesión con Firebase.');
+        }
+      }
+    }
+
+    // 2. Modo local PBKDF2
     const users = this.getAllUsers();
     const user = users.find(u => u.email === cleanEmail);
     if (!user) {
@@ -225,8 +484,6 @@ class AuthDBService {
     }
 
     this.createSession(user, rememberMe);
-    this.syncLoginFirebase(cleanEmail, password);
-
     return this.sanitizeUser(user);
   }
 
@@ -267,11 +524,13 @@ class AuthDBService {
     }
   }
 
-  logout() {
+  async logout() {
     localStorage.removeItem(this.STORAGE_SESSION_KEY);
     this.currentUser = null;
-    if (window.firebase && window.firebase.auth) {
-      try { window.firebase.auth().signOut(); } catch(e) {}
+    if (this.isFirebaseReady && this.firebaseAuth) {
+      try {
+        await this.firebaseAuth.signOut();
+      } catch (e) {}
     }
   }
 
@@ -292,7 +551,7 @@ class AuthDBService {
   }
 
   // ==========================================
-  // GESTIÓN DE TURNOS (CRUD AISLADO POR USUARIO)
+  // GESTIÓN DE TURNOS (CRUD CON SINCRONIZACIÓN)
   // ==========================================
   getAllShiftsFromStorage() {
     try {
@@ -365,9 +624,9 @@ class AuthDBService {
         startTime: shiftData.startTime,
         endTime: shiftData.endTime,
         type: shiftData.type,
-        hospital: shiftData.hospital || 'Hospital Clínico Central',
-        service: shiftData.service || 'UCI Adultos',
-        notes: shiftData.notes || '',
+        hospital: (shiftData.hospital || '').trim(),
+        service: (shiftData.service || '').trim(),
+        notes: (shiftData.notes || '').trim(),
         reminders: shiftData.reminders || { reminder2h: true, reminderTupper: true, reminderRest: true },
         updatedAt: new Date().toISOString()
       };
@@ -380,9 +639,9 @@ class AuthDBService {
         startTime: shiftData.startTime,
         endTime: shiftData.endTime,
         type: shiftData.type,
-        hospital: shiftData.hospital || 'Hospital Clínico Central',
-        service: shiftData.service || 'UCI Adultos',
-        notes: shiftData.notes || '',
+        hospital: (shiftData.hospital || '').trim(),
+        service: (shiftData.service || '').trim(),
+        notes: (shiftData.notes || '').trim(),
         reminders: shiftData.reminders || { reminder2h: true, reminderTupper: true, reminderRest: true },
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString()
@@ -513,6 +772,8 @@ class AuthDBService {
     }
 
     this.saveAllCommitmentsToStorage(all);
+    this.syncCommitmentToFirebase(saved);
+
     return saved;
   }
 
@@ -530,6 +791,8 @@ class AuthDBService {
 
     const deleted = all.splice(idx, 1)[0];
     this.saveAllCommitmentsToStorage(all);
+    this.deleteCommitmentFromFirebase(id);
+
     return deleted;
   }
 
@@ -570,7 +833,7 @@ class AuthDBService {
             hasConflict: true,
             type: 'shift',
             title: `Cruce Directo con ${shiftName}`,
-            message: `Este compromiso coincide con tu ${shiftName} programado de ${s.startTime} a ${s.endTime} en ${s.hospital || 'Hospital'} (${s.service || 'UCI'}).`,
+            message: `Este compromiso coincide con tu ${shiftName} programado de ${s.startTime} a ${s.endTime} en ${s.hospital || 'Centro Hospitalario'}${s.service ? ' (' + s.service + ')' : ''}.`,
             item: s
           };
         }
@@ -587,7 +850,6 @@ class AuthDBService {
         let sStart = sh1 * 60 + sm1;
         let sEnd = sh2 * 60 + sm2;
         if (sEnd <= sStart) {
-          // El turno terminó en dateStr a las sh2:sm2
           const morningEndMin = sh2 * 60 + sm2;
           if (cStart < morningEndMin) {
             return {
@@ -599,7 +861,7 @@ class AuthDBService {
             };
           }
 
-          // Descanso protegido obligatorio post-noche (8 horas post-salida)
+          // Descanso protegido post-noche (8 horas post-salida)
           const restEndMin = morningEndMin + 8 * 60;
           if (cStart < restEndMin) {
             const restEndH = Math.floor(restEndMin / 60);
@@ -695,60 +957,6 @@ class AuthDBService {
       }
     }
     return null;
-  }
-
-  // ==========================================
-  // INTEGRACIÓN CON LA NUBE (FIREBASE OPCIONAL)
-  // ==========================================
-  getFirebaseConfig() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_FIREBASE_KEY);
-      return data ? JSON.parse(data) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  saveFirebaseConfig(config) {
-    if (!config) {
-      localStorage.removeItem(this.STORAGE_FIREBASE_KEY);
-    } else {
-      localStorage.setItem(this.STORAGE_FIREBASE_KEY, JSON.stringify(config));
-    }
-  }
-
-  syncRegisterFirebase(email, password) {
-    if (window.firebase && window.firebase.auth && this.getFirebaseConfig()) {
-      try {
-        window.firebase.auth().createUserWithEmailAndPassword(email, password).catch(console.warn);
-      } catch (e) {}
-    }
-  }
-
-  syncLoginFirebase(email, password) {
-    if (window.firebase && window.firebase.auth && this.getFirebaseConfig()) {
-      try {
-        window.firebase.auth().signInWithEmailAndPassword(email, password).catch(console.warn);
-      } catch (e) {}
-    }
-  }
-
-  syncShiftToFirebase(shift) {
-    if (window.firebase && window.firebase.firestore && this.getFirebaseConfig() && this.currentUser) {
-      try {
-        const db = window.firebase.firestore();
-        db.collection('users').doc(this.currentUser.id).collection('shifts').doc(shift.id).set(shift).catch(console.warn);
-      } catch (e) {}
-    }
-  }
-
-  deleteShiftFromFirebase(shiftId) {
-    if (window.firebase && window.firebase.firestore && this.getFirebaseConfig() && this.currentUser) {
-      try {
-        const db = window.firebase.firestore();
-        db.collection('users').doc(this.currentUser.id).collection('shifts').doc(shiftId).delete().catch(console.warn);
-      } catch (e) {}
-    }
   }
 }
 

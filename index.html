@@ -107,7 +107,7 @@
 
         <div class="hidden xl:flex items-center gap-2 bg-surface-container-low px-3 py-1.5 rounded-full border border-outline-variant/40">
           <span class="material-symbols-outlined text-primary text-base">domain</span>
-          <span class="font-label-sm text-xs text-on-surface-variant font-medium">Hospital Clínico Central • UCI Adultos</span>
+          <span id="headerHospitalBadge" class="font-label-sm text-xs text-on-surface-variant font-medium">AntiTurno • Gestión Clínica</span>
           <span class="w-2 h-2 rounded-full bg-primary animate-pulse ml-1"></span>
         </div>
       </div>
@@ -401,12 +401,7 @@
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div class="flex flex-col gap-1.5">
               <label class="font-title-md text-xs font-bold text-on-surface">Centro Hospitalario</label>
-              <select id="shiftHospitalSelect" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface font-title-md outline-none focus:ring-2 focus:ring-primary cursor-pointer">
-                <option value="Hospital Clínico Central">Hospital Clínico Central</option>
-                <option value="Hospital General Universitario">Hospital General Universitario</option>
-                <option value="Clínica Santa María">Clínica Santa María</option>
-                <option value="Centro de Atención Primaria (CAP)">Centro de Atención Primaria (CAP)</option>
-              </select>
+              <input type="text" id="shiftHospitalInput" value="" placeholder="Ej: Hospital Universitario, Clínica San Rafael..." class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface font-title-md outline-none focus:ring-2 focus:ring-primary"/>
             </div>
             <div class="flex flex-col gap-1.5">
               <label class="font-title-md text-xs font-bold text-on-surface">Servicio / Unidad Clínica</label>
@@ -1014,6 +1009,11 @@
           <input type="text" id="fbAuthDomain" placeholder="mi-proyecto-12345.firebaseapp.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
         </div>
 
+        <div class="flex flex-col gap-1">
+          <label class="text-xs font-bold text-on-surface">App ID (opcional)</label>
+          <input type="text" id="fbAppId" placeholder="1:123456789:web:abcdef..." class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
+        </div>
+
         <div class="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant/30">
           <button type="button" onclick="closeCloudConfigModal()" class="px-4 py-2 rounded-xl bg-surface-container text-on-surface text-xs font-semibold">
             Cancelar
@@ -1064,7 +1064,13 @@
     </div>
   </footer>
 
+    <!-- Firebase Compat SDK (Auth & Firestore) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  
   <!-- Scripts de la Aplicación -->
+  <script src="js/firebase-config.js"></script>
   <script src="js/auth-db.js"></script>
   <script src="js/app.js"></script>
 </body>

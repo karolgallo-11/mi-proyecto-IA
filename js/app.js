@@ -19,6 +19,15 @@ const AppState = {
 // ==========================================
 // INICIALIZACIÓN
 // ==========================================
+window.addEventListener('antiturno-data-synced', () => {
+  renderCalendar();
+  renderUpcomingShifts();
+  renderHeroCard();
+  renderPersonalView();
+  renderHoursSummary();
+  updateAuthUI();
+});
+
 document.addEventListener('DOMContentLoaded', () => {
   AuthDB.init();
   updateAuthUI();
@@ -384,7 +393,8 @@ function handleSaveShift(event) {
   const date = document.getElementById('shiftDateInput').value;
   const startTime = document.getElementById('shiftStartTimeInput').value;
   const endTime = document.getElementById('shiftEndTimeInput').value;
-  const hospital = document.getElementById('shiftHospitalSelect').value;
+  const hospEl = document.getElementById('shiftHospitalInput') || document.getElementById('shiftHospitalSelect');
+  const hospital = hospEl ? hospEl.value.trim() : '';
   const service = document.getElementById('shiftServiceInput').value;
   const notes = document.getElementById('shiftNotesInput').value;
 
@@ -408,7 +418,7 @@ function handleSaveShift(event) {
       startTime,
       endTime,
       type: AppState.activeShiftType,
-      hospital: hospital || 'Hospital Clínico Central',
+      hospital: hospital || '',
       service: service || 'UCI Adultos',
       notes: notes || '',
       reminders: { reminder2h, reminderTupper, reminderRest }
@@ -441,7 +451,8 @@ function editShift(shiftId) {
   document.getElementById('shiftDateInput').value = shift.date;
   document.getElementById('shiftStartTimeInput').value = shift.startTime;
   document.getElementById('shiftEndTimeInput').value = shift.endTime;
-  document.getElementById('shiftHospitalSelect').value = shift.hospital || 'Hospital Clínico Central';
+  const editHospEl = document.getElementById('shiftHospitalInput') || document.getElementById('shiftHospitalSelect');
+  if (editHospEl) editHospEl.value = shift.hospital || '';
   document.getElementById('shiftServiceInput').value = shift.service || 'UCI Adultos';
   document.getElementById('shiftNotesInput').value = shift.notes || '';
 
@@ -503,7 +514,8 @@ function resetShiftForm() {
 
   const todayStr = formatLocalDate(new Date());
   document.getElementById('shiftDateInput').value = todayStr;
-  document.getElementById('shiftHospitalSelect').value = 'Hospital Clínico Central';
+  const resetHospEl = document.getElementById('shiftHospitalInput') || document.getElementById('shiftHospitalSelect');
+  if (resetHospEl) resetHospEl.value = '';
   document.getElementById('shiftServiceInput').value = 'UCI Adultos';
   document.getElementById('shiftNotesInput').value = '';
 
@@ -1551,11 +1563,12 @@ function escapeICS(str) {
 function openCloudConfigModal() {
   const modal = document.getElementById('cloudConfigModal');
   if (!modal) return;
-  const config = AuthDB.getFirebaseConfig();
-  if (config) {
-    document.getElementById('fbApiKey').value = config.apiKey || '';
-    document.getElementById('fbProjectId').value = config.projectId || '';
-    document.getElementById('fbAuthDomain').value = config.authDomain || '';
+  const cfg = AuthDB.getFirebaseConfig();
+  if (cfg) {
+    if (document.getElementById('fbApiKey')) document.getElementById('fbApiKey').value = cfg.apiKey || '';
+    if (document.getElementById('fbProjectId')) document.getElementById('fbProjectId').value = cfg.projectId || '';
+    if (document.getElementById('fbAuthDomain')) document.getElementById('fbAuthDomain').value = cfg.authDomain || '';
+    if (document.getElementById('fbAppId')) document.getElementById('fbAppId').value = cfg.appId || '';
   }
   modal.classList.remove('hidden');
 }
@@ -1567,18 +1580,22 @@ function closeCloudConfigModal() {
 
 function saveCloudConfig(event) {
   event.preventDefault();
-  const apiKey = document.getElementById('fbApiKey').value.trim();
-  const projectId = document.getElementById('fbProjectId').value.trim();
-  const authDomain = document.getElementById('fbAuthDomain').value.trim();
+  const apiKey = document.getElementById('fbApiKey')?.value.trim() || '';
+  const projectId = document.getElementById('fbProjectId')?.value.trim() || '';
+  const authDomain = document.getElementById('fbAuthDomain')?.value.trim() || '';
+  const appId = document.getElementById('fbAppId')?.value.trim() || '';
 
   if (!apiKey || !projectId) {
     AuthDB.saveFirebaseConfig(null);
-    showToast('Configuración de nube eliminada. Funcionando en modo local seguro.', 'info');
+    showToast('Configuración eliminada. Operando en modo local.', 'info');
   } else {
-    AuthDB.saveFirebaseConfig({ apiKey, projectId, authDomain });
-    showToast('¡Configuración de nube guardada con éxito!', 'success');
+    AuthDB.saveFirebaseConfig({ apiKey, projectId, authDomain, appId });
+    showToast('¡Configuración de Firebase guardada con éxito!', 'success');
   }
   closeCloudConfigModal();
+  updateAuthUI();
+  renderCalendar();
+  renderUpcomingShifts();
 }
 
 // ==========================================
