@@ -4,16 +4,112 @@
  * Protección Anti-Cruces, Calendario Dinámico Unificado, Próximas Guardias y Sincronización .ICS.
  */
 
+// ==========================================
+// SISTEMA VISUAL Y FUENTE DE VERDAD DE TURNOS (PLAN 01)
+// ==========================================
+const SHIFT_TYPES = {
+  M: {
+    code: 'M',
+    label: 'Mañana',
+    short: 'M',
+    icon: 'wb_sunny',
+    color: '#F59E0B',
+    bg: '#FEF3C7',
+    border: '#FCD34D',
+    text: '#92400E',
+    badgeClass: 'shift-badge-m',
+    cardClass: 'shift-card-m',
+    borderClass: 'shift-border-m',
+    bgClass: 'shift-bg-m',
+    heroGradient: 'from-amber-500/15 via-amber-100/30 to-surface-container-lowest',
+    heroBorder: 'border-amber-300/60',
+    defaults: ['07:00', '15:00'],
+    compactHours: '07–15'
+  },
+  T: {
+    code: 'T',
+    label: 'Tarde',
+    short: 'T',
+    icon: 'wb_twilight',
+    color: '#EA580C',
+    bg: '#FFEDD5',
+    border: '#FDBA74',
+    text: '#9A3412',
+    badgeClass: 'shift-badge-t',
+    cardClass: 'shift-card-t',
+    borderClass: 'shift-border-t',
+    bgClass: 'shift-bg-t',
+    heroGradient: 'from-orange-500/15 via-orange-100/30 to-surface-container-lowest',
+    heroBorder: 'border-orange-300/60',
+    defaults: ['15:00', '23:00'],
+    compactHours: '15–23'
+  },
+  N: {
+    code: 'N',
+    label: 'Noche',
+    short: 'N',
+    icon: 'bedtime',
+    color: '#4F46E5',
+    bg: '#EEF2FF',
+    border: '#A5B4FC',
+    text: '#3730A3',
+    badgeClass: 'shift-badge-n',
+    cardClass: 'shift-card-n',
+    borderClass: 'shift-border-n',
+    bgClass: 'shift-bg-n',
+    heroGradient: 'from-indigo-600/15 via-indigo-100/30 to-surface-container-lowest',
+    heroBorder: 'border-indigo-300/60',
+    defaults: ['23:00', '07:00'],
+    compactHours: '23–07'
+  },
+  G: {
+    code: 'G',
+    label: 'Guardia 24h',
+    short: 'G',
+    icon: 'emergency',
+    color: '#DC2626',
+    bg: '#FEE2E2',
+    border: '#FCA5A5',
+    text: '#991B1B',
+    badgeClass: 'shift-badge-g',
+    cardClass: 'shift-card-g',
+    borderClass: 'shift-border-g',
+    bgClass: 'shift-bg-g',
+    heroGradient: 'from-red-600/15 via-red-100/30 to-surface-container-lowest',
+    heroBorder: 'border-red-300/60',
+    defaults: ['08:00', '08:00'],
+    compactHours: '24h'
+  }
+};
+
+const REST_TYPE = {
+  label: 'Descanso post-guardia',
+  short: 'Descanso',
+  icon: 'spa',
+  color: '#10B981',
+  bg: '#D1FAE5',
+  border: '#A7F3D0',
+  text: '#065F46',
+  badgeClass: 'shift-badge-rest',
+  borderClass: 'shift-border-rest',
+  bgClass: 'shift-bg-rest',
+  heroGradient: 'from-emerald-500/15 via-emerald-100/30 to-surface-container-lowest',
+  heroBorder: 'border-emerald-300/60'
+};
+
 // Estado global de la aplicación
 const AppState = {
   currentView: 'dashboard',
   calendarDate: new Date(),
   selectedDate: null,
   activeShiftType: 'M',
+  calendarFilter: 'all', // 'all' | 'M' | 'T' | 'N' | 'G' | 'personal'
   editingShiftId: null,
   activeCategoryFilter: 'all',
   editingCommitmentId: null,
-  pendingCommitmentData: null
+  pendingCommitmentData: null,
+  shiftReminders: [],
+  commitmentReminders: []
 };
 
 // ==========================================
@@ -25,7 +121,18 @@ window.addEventListener('antiturno-data-synced', () => {
   renderHeroCard();
   renderPersonalView();
   renderHoursSummary();
+  renderUpcomingReminders();
+
+  // Iniciar motor de recordatorios y avisos clínicos (Plan 03)
+  if (typeof ReminderService !== 'undefined') {
+    ReminderService.init();
+  }
+  renderUpcomingReminders();
   updateAuthUI();
+});
+
+window.addEventListener('antiturno-reminder-prefs-changed', () => {
+  renderUpcomingReminders();
 });
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -49,10 +156,20 @@ document.addEventListener('DOMContentLoaded', () => {
   const validViews = ['dashboard', 'registro', 'personal', 'resumen'];
   navigateTo(validViews.includes(initialHash) ? initialHash : 'dashboard');
 
+  // Restaurar vínculo a archivo local si existe (Chrome/Edge)
+  if (window.JsonDB && typeof window.JsonDB.restoreFileLink === 'function') {
+    window.JsonDB.restoreFileLink().catch(() => {});
+    window.JsonDB.onChange(() => {
+      renderDataModalStatus();
+    });
+  }
+
   if (!AuthDB.getCurrentUser()) {
     setTimeout(() => {
       openAuthModal('login');
     }, 400);
+  } else {
+    checkBackupReminderNotice();
   }
 });
 
@@ -163,9 +280,13 @@ function updateAuthUI() {
               <span class="material-symbols-outlined text-primary text-lg">calendar_month</span>
               <span>Exportar / Sincronizar (.ics)</span>
             </button>
-            <button onclick="openCloudConfigModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
-              <span class="material-symbols-outlined text-primary text-lg">cloud_sync</span>
-              <span>Sincronización Nube (Firebase)</span>
+            <button onclick="openDataModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
+              <span class="material-symbols-outlined text-primary text-lg">folder_open</span>
+              <span>Mis datos (JSON)</span>
+            </button>
+            <button onclick="openReminderPrefsModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
+              <span class="material-symbols-outlined text-primary text-lg">tune</span>
+              <span>Preferencias de Recordatorios</span>
             </button>
             <button onclick="handleLogout()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-error hover:bg-error-container/30 rounded-xl text-sm font-semibold transition-colors mt-1" type="button">
               <span class="material-symbols-outlined text-lg">logout</span>
@@ -198,11 +319,43 @@ document.addEventListener('click', (e) => {
   }
 });
 
+function togglePasswordVisibility(inputId, btnId) {
+  const input = document.getElementById(inputId);
+  const btn = document.getElementById(btnId);
+  if (!input) return;
+  const isPassword = input.type === 'password';
+  input.type = isPassword ? 'text' : 'password';
+  if (btn) {
+    const icon = btn.querySelector('.material-symbols-outlined');
+    if (icon) icon.innerText = isPassword ? 'visibility_off' : 'visibility';
+  }
+}
+
 function openAuthModal(mode = 'login') {
   const modal = document.getElementById('authModal');
   if (!modal) return;
   modal.classList.remove('hidden');
   switchAuthTab(mode);
+
+  // Prellenar último correo recordado
+  const lastEmail = AuthDB.getLastEmail();
+  const emailInput = document.getElementById('loginEmailInput');
+  const rememberEmailCb = document.getElementById('loginRememberEmailCheckbox');
+  if (emailInput) {
+    if (lastEmail) {
+      emailInput.value = lastEmail;
+      if (rememberEmailCb) rememberEmailCb.checked = true;
+      setTimeout(() => {
+        const passInput = document.getElementById('loginPasswordInput');
+        if (passInput && mode === 'login') passInput.focus();
+      }, 100);
+    } else {
+      if (rememberEmailCb) rememberEmailCb.checked = true;
+      setTimeout(() => {
+        if (mode === 'login') emailInput.focus();
+      }, 100);
+    }
+  }
 }
 
 function closeAuthModal() {
@@ -245,6 +398,7 @@ async function handleLoginSubmit(event) {
   const email = document.getElementById('loginEmailInput').value;
   const password = document.getElementById('loginPasswordInput').value;
   const remember = document.getElementById('loginRememberCheckbox')?.checked ?? true;
+  const rememberEmail = document.getElementById('loginRememberEmailCheckbox')?.checked ?? true;
   const errBox = document.getElementById('authLoginError');
   const submitBtn = document.getElementById('loginSubmitBtn');
 
@@ -252,7 +406,21 @@ async function handleLoginSubmit(event) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="material-symbols-outlined animate-spin text-lg">progress_activity</span><span>Iniciando...</span>';
 
-    await AuthDB.login({ email, password, rememberMe: remember });
+    const user = await AuthDB.login({ email, password, rememberMe: remember, rememberEmail });
+
+    // Credential Management API (autoguardado nativo del navegador si está disponible)
+    if (window.PasswordCredential && navigator.credentials && typeof navigator.credentials.store === 'function') {
+      try {
+        await navigator.credentials.store(new PasswordCredential({
+          id: email,
+          password: password,
+          name: user?.name || email
+        }));
+      } catch (credErr) {
+        // Ignorar si el usuario rechaza o el navegador no lo permite en este contexto
+      }
+    }
+
     closeAuthModal();
     updateAuthUI();
     renderCalendar();
@@ -261,6 +429,7 @@ async function handleLoginSubmit(event) {
     renderPersonalView();
     renderHoursSummary();
     showToast('¡Bienvenida(o)! Has iniciado sesión correctamente.', 'success');
+    checkBackupReminderNotice();
   } catch (error) {
     if (errBox) {
       errBox.innerText = error.message;
@@ -279,6 +448,7 @@ async function handleRegisterSubmit(event) {
   const email = document.getElementById('regEmailInput').value;
   const password = document.getElementById('regPasswordInput').value;
   const confirmPassword = document.getElementById('regConfirmPasswordInput').value;
+  const rememberEmail = document.getElementById('regRememberEmailCheckbox')?.checked ?? true;
   const errBox = document.getElementById('authRegisterError');
   const submitBtn = document.getElementById('regSubmitBtn');
 
@@ -294,7 +464,23 @@ async function handleRegisterSubmit(event) {
     submitBtn.disabled = true;
     submitBtn.innerHTML = '<span class="material-symbols-outlined animate-spin text-lg">progress_activity</span><span>Creando cuenta...</span>';
 
-    await AuthDB.register({ name, email, password });
+    const user = await AuthDB.register({ name, email, password, rememberEmail });
+
+    // Prellenar en el formulario de login para futuros accesos
+    const loginEmailEl = document.getElementById('loginEmailInput');
+    if (loginEmailEl && rememberEmail) loginEmailEl.value = email;
+
+    // Guardar credenciales en el navegador si está disponible
+    if (window.PasswordCredential && navigator.credentials && typeof navigator.credentials.store === 'function') {
+      try {
+        await navigator.credentials.store(new PasswordCredential({
+          id: email,
+          password: password,
+          name: user?.name || name
+        }));
+      } catch (credErr) {}
+    }
+
     closeAuthModal();
     updateAuthUI();
     renderCalendar();
@@ -314,9 +500,9 @@ async function handleRegisterSubmit(event) {
   }
 }
 
-function handleLogout() {
+async function handleLogout() {
   if (confirm('¿Deseas cerrar tu sesión?')) {
-    AuthDB.logout();
+    await AuthDB.logout();
     updateAuthUI();
     renderCalendar();
     renderUpcomingShifts();
@@ -333,49 +519,39 @@ function handleLogout() {
 // ==========================================
 function selectShiftType(type) {
   AppState.activeShiftType = type;
+  if (!AppState.editingShiftId && typeof applyShiftTemplateReminders === 'function') {
+    applyShiftTemplateReminders(type);
+  }
+
   const btns = document.querySelectorAll('.shift-type-btn');
   btns.forEach(b => {
     const bType = b.getAttribute('data-shift-type');
     const checkIcon = b.querySelector('.check-icon');
-    if (bType === type) {
-      b.classList.remove('bg-surface-container-low');
-      b.classList.add('ring-2', 'ring-primary', 'bg-surface-container-lowest', 'shadow-xs');
+    const isSelected = bType === type;
+
+    // Resetear clases seleccionadas previas
+    b.classList.remove(
+      'shift-card-m-selected', 'shift-card-t-selected', 'shift-card-n-selected', 'shift-card-g-selected',
+      'ring-2', 'ring-primary', 'bg-surface-container-lowest', 'shadow-xs', 'shadow-sm'
+    );
+
+    if (isSelected) {
+      b.classList.add(`shift-card-${bType.toLowerCase()}-selected`, 'shadow-sm');
       if (checkIcon) {
-        checkIcon.classList.remove('hidden', 'text-secondary/40');
-        checkIcon.classList.add('text-primary');
+        checkIcon.classList.remove('hidden');
       }
     } else {
-      b.classList.remove('ring-2', 'ring-primary', 'bg-surface-container-lowest', 'shadow-xs');
-      b.classList.add('bg-surface-container-low');
       if (checkIcon) {
         checkIcon.classList.add('hidden');
-        checkIcon.classList.remove('text-primary');
-        checkIcon.classList.add('text-secondary/40');
       }
     }
   });
 
   const startInput = document.getElementById('shiftStartTimeInput');
   const endInput = document.getElementById('shiftEndTimeInput');
-  if (startInput && endInput) {
-    switch (type) {
-      case 'M':
-        startInput.value = '07:00';
-        endInput.value = '15:00';
-        break;
-      case 'T':
-        startInput.value = '15:00';
-        endInput.value = '23:00';
-        break;
-      case 'N':
-        startInput.value = '23:00';
-        endInput.value = '07:00';
-        break;
-      case 'G':
-        startInput.value = '08:00';
-        endInput.value = '08:00';
-        break;
-    }
+  if (!AppState.editingShiftId && startInput && endInput && SHIFT_TYPES[type]) {
+    startInput.value = SHIFT_TYPES[type].defaults[0];
+    endInput.value = SHIFT_TYPES[type].defaults[1];
   }
 }
 
@@ -398,9 +574,8 @@ function handleSaveShift(event) {
   const service = document.getElementById('shiftServiceInput').value;
   const notes = document.getElementById('shiftNotesInput').value;
 
-  const reminder2h = document.getElementById('remind2hCheckbox')?.checked ?? true;
-  const reminderTupper = document.getElementById('remindTupperCheckbox')?.checked ?? true;
-  const reminderRest = document.getElementById('remindRestCheckbox')?.checked ?? true;
+  // Recordatorios dinámicos configurados en la interfaz (Plan 03)
+  const reminders = AppState.shiftReminders;
 
   if (!date) {
     showToast('Por favor selecciona la fecha del turno.', 'error');
@@ -421,7 +596,7 @@ function handleSaveShift(event) {
       hospital: hospital || '',
       service: service || 'UCI Adultos',
       notes: notes || '',
-      reminders: { reminder2h, reminderTupper, reminderRest }
+      reminders: AppState.shiftReminders
     };
 
     AuthDB.saveShift(shiftData);
@@ -456,15 +631,10 @@ function editShift(shiftId) {
   document.getElementById('shiftServiceInput').value = shift.service || 'UCI Adultos';
   document.getElementById('shiftNotesInput').value = shift.notes || '';
 
-  if (document.getElementById('remind2hCheckbox')) {
-    document.getElementById('remind2hCheckbox').checked = shift.reminders?.reminder2h ?? true;
-  }
-  if (document.getElementById('remindTupperCheckbox')) {
-    document.getElementById('remindTupperCheckbox').checked = shift.reminders?.reminderTupper ?? true;
-  }
-  if (document.getElementById('remindRestCheckbox')) {
-    document.getElementById('remindRestCheckbox').checked = shift.reminders?.reminderRest ?? true;
-  }
+  AppState.shiftReminders = Array.isArray(shift.reminders)
+    ? JSON.parse(JSON.stringify(shift.reminders))
+    : AuthDB.normalizeReminders(shift.reminders, shift.type);
+  renderShiftRemindersEditor();
 
   selectShiftType(shift.type || 'M');
 
@@ -520,6 +690,7 @@ function resetShiftForm() {
   document.getElementById('shiftNotesInput').value = '';
 
   selectShiftType('M');
+  applyShiftTemplateReminders('M');
 
   const formTitle = document.getElementById('shiftFormTitle');
   if (formTitle) formTitle.innerText = 'Planificar Nuevo Turno';
@@ -538,27 +709,22 @@ function resetShiftForm() {
 // COMPROMISOS PERSONALES & PROTECCIÓN ANTI-CRUCES
 // ==========================================
 const COMMITMENT_CATEGORIES = {
-  medica: { label: 'Cita Médica / Salud', color: 'bg-cyan-100 text-cyan-900 border-cyan-300', icon: 'medical_services' },
-  estudio: { label: 'Estudio / Formación', color: 'bg-purple-100 text-purple-900 border-purple-300', icon: 'school' },
-  familia: { label: 'Familia & Social', color: 'bg-emerald-100 text-emerald-900 border-emerald-300', icon: 'family_restroom' },
-  diligencias: { label: 'Diligencias / Trámites', color: 'bg-slate-100 text-slate-800 border-slate-300', icon: 'task_alt' },
-  descanso: { label: 'Descanso / Sueño Protegido', color: 'bg-indigo-100 text-indigo-900 border-indigo-300', icon: 'bed' },
-  ejercicio: { label: 'Ejercicio & Deporte', color: 'bg-orange-100 text-orange-900 border-orange-300', icon: 'fitness_center' },
-  otro: { label: 'Otro Compromiso', color: 'bg-pink-100 text-pink-900 border-pink-300', icon: 'bookmark' }
+  medica: { label: 'Cita Médica / Salud', color: 'bg-cyan-100 text-cyan-900 border-cyan-300', dot: 'bg-cyan-500', icon: 'medical_services' },
+  estudio: { label: 'Estudio / Formación', color: 'bg-purple-100 text-purple-900 border-purple-300', dot: 'bg-purple-500', icon: 'school' },
+  familia: { label: 'Familia & Social', color: 'bg-emerald-100 text-emerald-900 border-emerald-300', dot: 'bg-emerald-500', icon: 'family_restroom' },
+  diligencias: { label: 'Diligencias / Trámites', color: 'bg-slate-100 text-slate-800 border-slate-300', dot: 'bg-slate-500', icon: 'task_alt' },
+  descanso: { label: 'Descanso / Sueño Protegido', color: 'bg-indigo-100 text-indigo-900 border-indigo-300', dot: 'bg-indigo-500', icon: 'bed' },
+  ejercicio: { label: 'Ejercicio & Deporte', color: 'bg-orange-100 text-orange-900 border-orange-300', dot: 'bg-orange-500', icon: 'fitness_center' },
+  otro: { label: 'Otro Compromiso', color: 'bg-pink-100 text-pink-900 border-pink-300', dot: 'bg-pink-500', icon: 'bookmark' }
 };
 
 function openCommitmentModal(defaultDate = null, commitmentId = null) {
-  const user = AuthDB.getCurrentUser();
-  if (!user) {
-    openAuthModal('login');
-    showToast('Inicia sesión para gestionar tus compromisos personales.', 'warning');
-    return;
-  }
-
   const modal = document.getElementById('commitmentModal');
   const titleElem = document.getElementById('commitmentModalTitle');
   const conflictBanner = document.getElementById('commitmentConflictBanner');
   if (conflictBanner) conflictBanner.classList.add('hidden');
+
+  AppState.editingCommitmentId = commitmentId;
   AppState.pendingCommitmentData = null;
 
   if (commitmentId) {
@@ -569,7 +735,6 @@ function openCommitmentModal(defaultDate = null, commitmentId = null) {
     }
     AppState.editingCommitmentId = com.id;
     if (titleElem) titleElem.innerText = 'Modificar Compromiso Personal';
-
     document.getElementById('comTitleInput').value = com.title || '';
     document.getElementById('comCategorySelect').value = com.category || 'otro';
     document.getElementById('comDateInput').value = com.date || formatLocalDate(new Date());
@@ -577,10 +742,12 @@ function openCommitmentModal(defaultDate = null, commitmentId = null) {
     document.getElementById('comEndTimeInput').value = com.endTime || '12:00';
     document.getElementById('comLocationInput').value = com.location || '';
     document.getElementById('comNotesInput').value = com.notes || '';
+    AppState.commitmentReminders = Array.isArray(com.reminders)
+      ? JSON.parse(JSON.stringify(com.reminders))
+      : AuthDB.normalizeReminders(com.reminders, 'commitmentDefault');
   } else {
     AppState.editingCommitmentId = null;
     if (titleElem) titleElem.innerText = 'Nuevo Compromiso Personal';
-
     document.getElementById('comTitleInput').value = '';
     document.getElementById('comCategorySelect').value = 'medica';
     document.getElementById('comDateInput').value = defaultDate || formatLocalDate(new Date());
@@ -588,8 +755,11 @@ function openCommitmentModal(defaultDate = null, commitmentId = null) {
     document.getElementById('comEndTimeInput').value = '12:00';
     document.getElementById('comLocationInput').value = '';
     document.getElementById('comNotesInput').value = '';
+    const prefs = AuthDB.getReminderPrefs();
+    AppState.commitmentReminders = JSON.parse(JSON.stringify(prefs.commitmentDefault || []));
   }
 
+  renderCommitmentRemindersEditor();
   if (modal) modal.classList.remove('hidden');
 }
 
@@ -642,7 +812,8 @@ function handleSaveCommitment(event, forceSave = false) {
       startTime,
       endTime,
       location,
-      notes
+      notes,
+      reminders: AppState.commitmentReminders
     };
 
     // ALGORITMO PROTECCIÓN ANTI-CRUCES
@@ -845,6 +1016,126 @@ const MONTH_NAMES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+function setCalendarFilter(filter) {
+  AppState.calendarFilter = filter;
+  renderCalendar();
+}
+
+function renderCalendarLegend() {
+  const container = document.getElementById('calendarLegendContainer');
+  if (!container) return;
+
+  let html = '';
+  Object.keys(SHIFT_TYPES).forEach(k => {
+    const st = SHIFT_TYPES[k];
+    html += `
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${st.badgeClass}">
+        <span class="material-symbols-outlined text-[12px]">${st.icon}</span>
+        <span>${st.label}</span>
+      </span>
+    `;
+  });
+  html += `
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${REST_TYPE.badgeClass}">
+      <span class="material-symbols-outlined text-[12px]">${REST_TYPE.icon}</span>
+      <span>Descanso</span>
+    </span>
+    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-300">
+      <span class="w-2 h-2 rounded-full bg-purple-600"></span> Personal
+    </span>
+  `;
+  container.innerHTML = html;
+}
+
+function renderCalendarFilters() {
+  const container = document.getElementById('calendarFiltersBar');
+  if (!container) return;
+
+  const current = AppState.calendarFilter || 'all';
+
+  const filterOptions = [
+    { id: 'all', label: 'Todos' },
+    { id: 'M', label: 'Mañana', badgeClass: 'shift-badge-m', icon: 'wb_sunny' },
+    { id: 'T', label: 'Tarde', badgeClass: 'shift-badge-t', icon: 'wb_twilight' },
+    { id: 'N', label: 'Noche', badgeClass: 'shift-badge-n', icon: 'bedtime' },
+    { id: 'G', label: 'Guardia 24h', badgeClass: 'shift-badge-g', icon: 'emergency' },
+    { id: 'personal', label: 'Personal', icon: 'self_improvement' }
+  ];
+
+  let html = '<span class="text-on-surface-variant font-bold text-[11px] mr-1">Filtrar:</span>';
+  filterOptions.forEach(opt => {
+    const isActive = current === opt.id;
+    let activeStyle = '';
+    if (isActive) {
+      if (opt.id === 'all') {
+        activeStyle = 'bg-primary text-on-primary font-bold shadow-xs';
+      } else if (opt.badgeClass) {
+        activeStyle = `${opt.badgeClass} ring-2 ring-offset-1 ring-current font-bold shadow-xs`;
+      } else {
+        activeStyle = 'bg-purple-600 text-white font-bold shadow-xs';
+      }
+    } else {
+      activeStyle = 'bg-surface-container-low hover:bg-surface-container text-on-surface-variant hover:text-on-surface border border-outline-variant/30';
+    }
+
+    html += `
+      <button type="button" onclick="setCalendarFilter('${opt.id}')"
+              class="px-2.5 py-1 rounded-lg text-[11px] flex items-center gap-1 transition-all ${activeStyle}"
+              title="Filtrar por ${opt.label}">
+        ${opt.icon ? `<span class="material-symbols-outlined text-[13px]">${opt.icon}</span>` : ''}
+        <span>${opt.label}</span>
+      </button>
+    `;
+  });
+
+  container.innerHTML = html;
+}
+
+function renderCalendarMonthSummary(shifts, year, month) {
+  const container = document.getElementById('calendarMonthSummaryBar');
+  if (!container) return;
+
+  const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`;
+  const monthShifts = shifts.filter(s => s.date && s.date.startsWith(monthPrefix));
+
+  let countM = 0;
+  let countT = 0;
+  let countN = 0;
+  let countG = 0;
+  let totalHours = 0;
+
+  monthShifts.forEach(s => {
+    if (s.type === 'M') countM++;
+    else if (s.type === 'T') countT++;
+    else if (s.type === 'N') countN++;
+    else if (s.type === 'G') countG++;
+    totalHours += AuthDB.calculateShiftHours(s.startTime, s.endTime);
+  });
+
+  container.innerHTML = `
+    <span class="text-on-surface-variant font-bold text-[11px]">Mes:</span>
+    <span class="shift-badge-m px-2 py-0.5 rounded-md font-bold flex items-center gap-1" title="${countM} turnos de mañana">
+      <span class="material-symbols-outlined text-[12px]">wb_sunny</span>
+      <span>${countM} M</span>
+    </span>
+    <span class="shift-badge-t px-2 py-0.5 rounded-md font-bold flex items-center gap-1" title="${countT} turnos de tarde">
+      <span class="material-symbols-outlined text-[12px]">wb_twilight</span>
+      <span>${countT} T</span>
+    </span>
+    <span class="shift-badge-n px-2 py-0.5 rounded-md font-bold flex items-center gap-1" title="${countN} turnos de noche">
+      <span class="material-symbols-outlined text-[12px]">bedtime</span>
+      <span>${countN} N</span>
+    </span>
+    <span class="shift-badge-g px-2 py-0.5 rounded-md font-bold flex items-center gap-1" title="${countG} guardias de 24h">
+      <span class="material-symbols-outlined text-[12px]">emergency</span>
+      <span>${countG} G</span>
+    </span>
+    <span class="bg-surface-container text-on-surface px-2 py-0.5 rounded-md font-bold border border-outline-variant/30" title="Total de horas clínicas en el mes">
+      ${totalHours.toFixed(0)}h
+    </span>
+  `;
+}
+
 function renderCalendar() {
   const container = document.getElementById('dynamicCalendarGrid');
   const monthTitle = document.getElementById('calendarMonthTitle');
@@ -854,6 +1145,9 @@ function renderCalendar() {
   const month = AppState.calendarDate.getMonth();
 
   monthTitle.innerText = `${MONTH_NAMES[month]} ${year}`;
+
+  renderCalendarLegend();
+  renderCalendarFilters();
 
   const firstDayOfMonth = new Date(year, month, 1);
   const lastDayOfMonth = new Date(year, month + 1, 0);
@@ -865,6 +1159,8 @@ function renderCalendar() {
   const user = AuthDB.getCurrentUser();
   const shifts = user ? AuthDB.getShifts() : [];
   const commitments = user ? AuthDB.getCommitments() : [];
+
+  renderCalendarMonthSummary(shifts, year, month);
 
   let html = '';
 
@@ -882,6 +1178,7 @@ function renderCalendar() {
   // 2. Días del mes actual
   const today = new Date();
   const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+  const currentFilter = AppState.calendarFilter || 'all';
 
   for (let day = 1; day <= totalDays; day++) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -889,22 +1186,99 @@ function renderCalendar() {
     const dayShifts = shifts.filter(s => s.date === dateStr);
     const dayCommitments = commitments.filter(c => c.date === dateStr);
 
+    // Detección de descanso post-noche / post-guardia
+    const prevDayDate = new Date(year, month, day - 1);
+    const prevDateStr = `${prevDayDate.getFullYear()}-${String(prevDayDate.getMonth() + 1).padStart(2, '0')}-${String(prevDayDate.getDate()).padStart(2, '0')}`;
+    const prevShifts = shifts.filter(s => s.date === prevDateStr);
+    const hadOvernightOr24 = prevShifts.some(s => s.type === 'N' || s.type === 'G');
+    const isPostGuardiaRest = hadOvernightOr24 && dayShifts.length === 0;
+
+    // Filtros del calendario
+    let isFilteredOut = false;
+    if (currentFilter !== 'all') {
+      if (currentFilter === 'personal') {
+        isFilteredOut = dayCommitments.length === 0;
+      } else {
+        isFilteredOut = !dayShifts.some(s => s.type === currentFilter);
+      }
+    }
+
+    // Estilo base de celda y bordes
+    let cellBgClass = 'bg-surface-container-low';
+    let cellBorderClass = isToday
+      ? 'ring-2 ring-primary border-primary shadow-sm bg-surface-container-lowest'
+      : 'border-outline-variant/20';
+
+    if (dayShifts.length > 0) {
+      const primaryShift = dayShifts[0];
+      const st = SHIFT_TYPES[primaryShift.type] || SHIFT_TYPES.M;
+      cellBorderClass += ` ${st.borderClass}`;
+      cellBgClass = st.bgClass;
+    } else if (isPostGuardiaRest) {
+      cellBorderClass += ` ${REST_TYPE.borderClass}`;
+      cellBgClass = REST_TYPE.bgClass;
+    }
+
+    // Badges de Turnos (Protagonistas)
     let badgesHtml = '';
-    // Badges de Turnos
     dayShifts.forEach(s => {
-      badgesHtml += getShiftBadgeHtml(s);
+      const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
+      const compactTime = s.type === 'G' ? '24h' : `${s.startTime.slice(0, 2)}–${s.endTime.slice(0, 2)}`;
+      badgesHtml += `
+        <div class="${st.badgeClass} px-1.5 py-1 rounded-lg flex items-center justify-between text-[11px] font-bold shadow-xs truncate" title="${escapeHTML(st.label)} (${s.startTime}-${s.endTime})">
+          <span class="flex items-center gap-1 truncate">
+            <span class="material-symbols-outlined text-[13px] shrink-0">${st.icon}</span>
+            <span class="font-extrabold">${st.short}</span>
+            <span class="truncate hidden sm:inline text-[10px] font-normal opacity-90">${st.label}</span>
+          </span>
+          <span class="text-[10px] font-mono shrink-0 ml-1 opacity-90 font-semibold">${compactTime}</span>
+        </div>
+      `;
     });
-    // Badges de Compromisos Personales
-    dayCommitments.forEach(c => {
-      badgesHtml += getCommitmentBadgeHtml(c);
-    });
+
+    // Indicador visual de descanso post-noche/post-guardia
+    if (isPostGuardiaRest) {
+      badgesHtml += `
+        <div class="${REST_TYPE.badgeClass} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[10px] font-bold truncate shadow-xs" title="Día de descanso recomendado tras guardia de noche o 24h">
+          <span class="material-symbols-outlined text-[12px] shrink-0">${REST_TYPE.icon}</span>
+          <span class="truncate">Descanso</span>
+        </div>
+      `;
+    }
+
+    // Badges de Compromisos Personales (Subordinados: micro-chips discretos)
+    if (dayCommitments.length > 0) {
+      const maxVisibleComs = 2;
+      const visibleComs = dayCommitments.slice(0, maxVisibleComs);
+      const remainingComs = dayCommitments.length - maxVisibleComs;
+
+      visibleComs.forEach(c => {
+        const meta = COMMITMENT_CATEGORIES[c.category] || COMMITMENT_CATEGORIES.otro;
+        badgesHtml += `
+          <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/90 border border-outline-variant/30 text-[10px] text-on-surface font-medium truncate shadow-2xs" title="${escapeHTML(c.title)} (${c.startTime})">
+            <span class="w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot || 'bg-primary'}"></span>
+            <span class="truncate">${escapeHTML(c.title)}</span>
+          </div>
+        `;
+      });
+      if (remainingComs > 0) {
+        badgesHtml += `<span class="text-[9px] text-on-surface-variant font-semibold pl-1">+${remainingComs} más</span>`;
+      }
+    }
 
     const isWeekend = (startDayOfWeek + day - 1) % 7 >= 5;
     const totalEvents = dayShifts.length + dayCommitments.length;
+    const filterClass = isFilteredOut ? 'opacity-25 grayscale-[0.6]' : 'opacity-100';
+
+    const ariaLabel = `${day} de ${MONTH_NAMES[month]}: ${dayShifts.map(s => `${SHIFT_TYPES[s.type]?.label || 'Turno'} de ${s.startTime} a ${s.endTime}`).join(', ') || (isPostGuardiaRest ? 'Descanso post-guardia' : 'Sin turnos')}${dayCommitments.length ? `, ${dayCommitments.length} compromiso(s)` : ''}`;
 
     html += `
-      <div onclick="openDayDetailsModal('${dateStr}')" 
-           class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl bg-surface-container-low hover:bg-surface-container transition-all cursor-pointer flex flex-col justify-between border ${isToday ? 'ring-2 ring-primary border-primary shadow-sm bg-surface-container-lowest' : 'border-outline-variant/20'}">
+      <div onclick="openDayDetailsModal('${dateStr}')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openDayDetailsModal('${dateStr}');}"
+           role="button"
+           tabindex="0"
+           aria-label="${escapeHTML(ariaLabel)}"
+           class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl ${cellBgClass} hover:bg-surface-container transition-all cursor-pointer flex flex-col justify-between border ${cellBorderClass} ${filterClass} focus-visible:ring-2 focus-visible:ring-primary focus:outline-none">
         <div class="flex items-center justify-between">
           <span class="font-label-md text-label-md font-bold ${isToday ? 'text-primary' : (isWeekend ? 'text-primary/80 font-bold' : 'text-on-surface')}">${day}</span>
           ${isToday ? '<span class="px-1.5 py-0.5 rounded-full bg-primary text-on-primary text-[9px] font-bold uppercase tracking-wider">Hoy</span>' : ''}
@@ -915,7 +1289,7 @@ function renderCalendar() {
         </div>
 
         <div class="flex items-center justify-end">
-          ${totalEvents === 0 ? '<span class="text-outline-variant/50 text-xs hover:text-primary font-bold">+</span>' : `<span class="text-[10px] text-on-surface-variant font-medium">${totalEvents} act.</span>`}
+          ${totalEvents === 0 && !isPostGuardiaRest ? '<span class="text-outline-variant/50 text-xs hover:text-primary font-bold">+</span>' : `<span class="text-[10px] text-on-surface-variant font-medium">${totalEvents} act.</span>`}
         </div>
       </div>
     `;
@@ -936,40 +1310,11 @@ function renderCalendar() {
 }
 
 function getShiftBadgeHtml(shift) {
-  let badgeClasses = '';
-  let label = '';
-  let icon = '';
-
-  switch (shift.type) {
-    case 'M':
-      badgeClasses = 'bg-primary-fixed text-on-primary-fixed-variant border border-primary-fixed-dim/60';
-      label = `Mañana (${shift.startTime}-${shift.endTime})`;
-      icon = 'wb_sunny';
-      break;
-    case 'T':
-      badgeClasses = 'bg-amber-100 text-amber-900 border border-amber-300';
-      label = `Tarde (${shift.startTime}-${shift.endTime})`;
-      icon = 'wb_twilight';
-      break;
-    case 'N':
-      badgeClasses = 'bg-tertiary-fixed text-on-tertiary-fixed-variant border border-tertiary-container/30';
-      label = `Noche (${shift.startTime}-${shift.endTime})`;
-      icon = 'bedtime';
-      break;
-    case 'G':
-      badgeClasses = 'bg-red-100 text-red-900 border border-red-300';
-      label = `Guardia 24h (${shift.startTime})`;
-      icon = 'emergency';
-      break;
-    default:
-      badgeClasses = 'bg-surface-container-high text-on-surface border border-outline-variant/40';
-      label = `Turno (${shift.startTime}-${shift.endTime})`;
-      icon = 'schedule';
-  }
-
+  const st = SHIFT_TYPES[shift.type] || SHIFT_TYPES.M;
+  const label = `${st.label} (${shift.startTime}-${shift.endTime})`;
   return `
-    <div class="${badgeClasses} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[11px] font-semibold truncate shadow-xs" title="${escapeHTML(label)}">
-      <span class="material-symbols-outlined text-[13px] shrink-0">${icon}</span>
+    <div class="${st.badgeClass} px-2 py-0.5 rounded-lg flex items-center gap-1.5 text-[11px] font-semibold truncate shadow-xs" title="${escapeHTML(label)}">
+      <span class="material-symbols-outlined text-[13px] shrink-0">${st.icon}</span>
       <span class="truncate">${escapeHTML(label)}</span>
     </div>
   `;
@@ -1058,24 +1403,21 @@ function openDayDetailsModal(dateStr) {
     `;
   } else {
     shifts.forEach(s => {
-      let typeLabel = 'Mañana';
-      let icon = 'wb_sunny';
-      let colorPill = 'bg-primary-fixed text-on-primary-fixed-variant';
-      if (s.type === 'T') { typeLabel = 'Tarde'; icon = 'wb_twilight'; colorPill = 'bg-amber-100 text-amber-900'; }
-      if (s.type === 'N') { typeLabel = 'Noche'; icon = 'bedtime'; colorPill = 'bg-tertiary-fixed text-on-tertiary-fixed-variant'; }
-      if (s.type === 'G') { typeLabel = 'Guardia 24h'; icon = 'emergency'; colorPill = 'bg-red-100 text-red-900'; }
-
+      const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
       const duration = AuthDB.calculateShiftHours(s.startTime, s.endTime);
 
       html += `
         <div class="p-3.5 rounded-xl bg-surface-container-lowest border border-outline-variant/30 flex items-center justify-between gap-3 shadow-xs">
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl ${colorPill} flex items-center justify-center shrink-0">
-              <span class="material-symbols-outlined text-xl">${icon}</span>
+            <div class="w-10 h-10 rounded-xl ${st.badgeClass} flex items-center justify-center shrink-0">
+              <span class="material-symbols-outlined text-xl">${st.icon}</span>
             </div>
             <div>
               <div class="flex items-center gap-1.5">
-                <span class="${colorPill} px-2 py-0.2 rounded font-label-sm text-[10px] font-bold uppercase">${typeLabel}</span>
+                <span class="${st.badgeClass} px-2 py-0.5 rounded font-label-sm text-[10px] font-bold uppercase flex items-center gap-1">
+                  <span class="material-symbols-outlined text-xs">${st.icon}</span>
+                  ${st.label}
+                </span>
                 <span class="text-xs font-bold text-on-surface">${s.startTime} - ${s.endTime} (${duration}h)</span>
               </div>
               <p class="text-xs text-on-surface font-semibold mt-0.5">${escapeHTML(s.service || 'UCI')} • ${escapeHTML(s.hospital || 'Hospital')}</p>
@@ -1150,14 +1492,7 @@ function openDayDetailsModal(dateStr) {
   }
   html += '</div>';
 
-  html += `
-    <div class="pt-3 border-t border-outline-variant/30 flex justify-end">
-      <button onclick="closeDayDetailsModal()" class="px-5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-bold transition-colors">
-        Cerrar
-      </button>
-    </div>
-  </div>`;
-
+  html += '</div>';
   content.innerHTML = html;
   modal.classList.remove('hidden');
 }
@@ -1233,28 +1568,25 @@ function renderUpcomingShifts() {
 
   let html = '<div class="flex flex-col gap-3">';
   upcoming.forEach(s => {
-    let typeName = 'Mañana';
-    let icon = 'wb_sunny';
-    let pillClass = 'bg-primary-fixed text-on-primary-fixed-variant';
-    if (s.type === 'T') { typeName = 'Tarde'; icon = 'wb_twilight'; pillClass = 'bg-amber-100 text-amber-900'; }
-    if (s.type === 'N') { typeName = 'Noche'; icon = 'bedtime'; pillClass = 'bg-tertiary-fixed text-on-tertiary-fixed-variant'; }
-    if (s.type === 'G') { typeName = 'Guardia 24h'; icon = 'emergency'; pillClass = 'bg-red-100 text-red-900'; }
-
+    const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
     const [y, m, d] = s.date.split('-');
     const formattedDate = `${d}/${m}/${y}`;
 
     html += `
-      <div class="p-4 rounded-xl bg-surface-container-lowest shadow-xs flex items-center justify-between gap-3 hover:bg-surface-container-low transition-colors">
+      <div class="p-4 rounded-xl bg-surface-container-lowest shadow-xs flex items-center justify-between gap-3 hover:bg-surface-container-low transition-colors border-l-4 ${st.borderClass} border border-outline-variant/20">
         <div class="flex items-center gap-3">
-          <div class="w-10 h-10 rounded-xl ${pillClass} flex items-center justify-center shrink-0">
-            <span class="material-symbols-outlined text-xl">${icon}</span>
+          <div class="w-10 h-10 rounded-xl ${st.badgeClass} flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-xl">${st.icon}</span>
           </div>
           <div>
             <div class="flex items-center gap-2">
-              <span class="${pillClass} px-2 py-0.5 rounded font-label-sm text-[10px] font-bold uppercase">${typeName}</span>
-              <span class="font-label-sm text-label-sm text-on-surface-variant font-semibold">${formattedDate}</span>
+              <span class="${st.badgeClass} px-2 py-0.5 rounded font-label-sm text-[10px] font-bold uppercase flex items-center gap-1">
+                <span class="material-symbols-outlined text-xs">${st.icon}</span>
+                ${st.label}
+              </span>
+              <span class="font-label-sm text-xs text-on-surface-variant font-semibold">${formattedDate}</span>
             </div>
-            <p class="font-title-md text-title-md text-on-surface font-semibold mt-0.5">${s.startTime} - ${s.endTime} • ${escapeHTML(s.service || 'UCI')}</p>
+            <p class="font-title-md text-sm text-on-surface font-semibold mt-0.5">${s.startTime} - ${s.endTime} • ${escapeHTML(s.service || 'UCI')}</p>
           </div>
         </div>
         <button onclick="editShift('${s.id}')" class="p-2 rounded-xl hover:bg-surface-container text-on-surface-variant hover:text-primary transition-colors" title="Editar turno">
@@ -1277,6 +1609,7 @@ function renderHeroCard() {
 
   const user = AuthDB.getCurrentUser();
   if (!user) {
+    heroContainer.className = 'relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border border-outline-variant/30';
     heroContainer.innerHTML = `
       <div class="relative p-6 flex items-center justify-between gap-4">
         <div class="flex items-center gap-4">
@@ -1299,21 +1632,25 @@ function renderHeroCard() {
   const nextShift = AuthDB.getNextUpcomingShift();
 
   if (!nextShift) {
+    heroContainer.className = `relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border ${REST_TYPE.borderClass} bg-gradient-to-br ${REST_TYPE.heroGradient}`;
     heroContainer.innerHTML = `
       <div class="relative p-6 lg:p-8 flex items-center justify-between gap-4">
         <div class="flex items-center gap-4">
-          <div class="w-14 h-14 rounded-2xl bg-primary-fixed flex items-center justify-center text-primary shrink-0">
-            <span class="material-symbols-outlined text-3xl">verified_user</span>
+          <div class="w-14 h-14 rounded-2xl ${REST_TYPE.badgeClass} flex items-center justify-center shrink-0 shadow-sm">
+            <span class="material-symbols-outlined text-3xl">${REST_TYPE.icon}</span>
           </div>
           <div>
             <div class="flex items-center gap-2 mb-1">
-              <span class="bg-primary-fixed text-on-primary-fixed-variant px-2.5 py-0.5 rounded-full font-label-sm text-label-sm font-bold uppercase">Descanso Activo</span>
+              <span class="${REST_TYPE.badgeClass} px-2.5 py-0.5 rounded-full font-label-sm text-xs font-bold uppercase flex items-center gap-1">
+                <span class="material-symbols-outlined text-sm">${REST_TYPE.icon}</span>
+                Descanso Activo
+              </span>
             </div>
-            <h2 class="font-headline-md text-headline-md text-on-surface font-bold">No tienes turnos próximos programados</h2>
-            <p class="font-body-md text-body-md text-on-surface-variant">Tu tiempo personal está libre de guardias inmediatas.</p>
+            <h2 class="font-headline-md text-lg sm:text-xl text-on-surface font-bold">No tienes turnos próximos programados</h2>
+            <p class="font-body-md text-xs sm:text-sm text-on-surface-variant">Tu tiempo personal está libre de guardias inmediatas.</p>
           </div>
         </div>
-        <button onclick="navigateTo('registro')" class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold flex items-center gap-1.5 shadow-xs transition-all">
+        <button onclick="navigateTo('registro')" class="px-5 py-2.5 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold text-sm flex items-center gap-1.5 shadow-xs transition-all">
           <span class="material-symbols-outlined">add_circle</span>
           <span>Nuevo Turno</span>
         </button>
@@ -1335,47 +1672,44 @@ function renderHeroCard() {
     timeText = '¡En curso ahora!';
   }
 
-  let typeName = 'Turno Mañana';
-  let typePill = 'bg-primary-fixed text-on-primary-fixed-variant';
-  let icon = 'wb_sunny';
-  if (nextShift.type === 'T') { typeName = 'Turno Tarde'; typePill = 'bg-amber-100 text-amber-900'; icon = 'wb_twilight'; }
-  if (nextShift.type === 'N') { typeName = 'Turno Noche'; typePill = 'bg-tertiary-fixed text-on-tertiary-fixed-variant'; icon = 'bedtime'; }
-  if (nextShift.type === 'G') { typeName = 'Guardia 24 Horas'; typePill = 'bg-red-100 text-red-900'; icon = 'emergency'; }
+  const st = SHIFT_TYPES[nextShift.type] || SHIFT_TYPES.M;
+  heroContainer.className = `relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border ${st.heroBorder} bg-gradient-to-br ${st.heroGradient}`;
 
   heroContainer.innerHTML = `
     <div class="relative p-6 lg:p-8 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-6">
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-5 min-w-0">
-        <div class="w-16 h-16 rounded-2xl ${typePill} flex items-center justify-center shrink-0 shadow-inner">
-          <span class="material-symbols-outlined text-3xl">${icon}</span>
+        <div class="w-16 h-16 rounded-2xl ${st.badgeClass} flex items-center justify-center shrink-0 shadow-md">
+          <span class="material-symbols-outlined text-3xl">${st.icon}</span>
         </div>
         <div class="flex flex-col min-w-0">
           <div class="flex flex-wrap items-center gap-2 mb-1">
-            <span class="${typePill} px-3 py-0.5 rounded-full font-label-sm text-label-sm font-bold tracking-wide uppercase">
-              ${typeName} • ${nextShift.startTime} - ${nextShift.endTime}
+            <span class="${st.badgeClass} px-3 py-0.5 rounded-full font-label-sm text-xs font-bold tracking-wide uppercase flex items-center gap-1.5 shadow-2xs">
+              <span class="material-symbols-outlined text-sm">${st.icon}</span>
+              Turno ${st.label} • ${nextShift.startTime} - ${nextShift.endTime}
             </span>
-            <span class="bg-surface-container text-on-surface-variant px-2.5 py-0.5 rounded-full font-label-sm text-label-sm flex items-center gap-1">
+            <span class="bg-surface-container-lowest/80 text-on-surface px-2.5 py-0.5 rounded-full font-label-sm text-xs flex items-center gap-1 border border-outline-variant/30">
               <span class="material-symbols-outlined text-sm text-primary">pin_drop</span>
               ${escapeHTML(nextShift.service || 'UCI')} • ${escapeHTML(nextShift.hospital || 'Hospital')}
             </span>
           </div>
-          <h1 class="font-headline-lg text-headline-lg text-on-surface tracking-tight truncate">
+          <h1 class="font-headline-lg text-xl sm:text-2xl text-on-surface font-extrabold tracking-tight truncate">
             Próximo Turno Programado: ${nextShift.date}
           </h1>
-          <p class="font-body-md text-body-md text-on-surface-variant flex items-center gap-2 mt-0.5">
+          <p class="font-body-md text-xs sm:text-sm text-on-surface-variant flex items-center gap-2 mt-0.5">
             <span>${nextShift.notes ? escapeHTML(nextShift.notes) : 'Sin notas clínicas adicionales registradas'}</span>
           </p>
         </div>
       </div>
       <div class="flex flex-wrap sm:flex-nowrap items-center gap-4 shrink-0">
-        <div class="bg-surface-container-low px-5 py-3 rounded-xl flex items-center gap-3">
-          <span class="material-symbols-outlined text-tertiary text-2xl">timer</span>
+        <div class="bg-surface-container-lowest/90 border border-outline-variant/30 px-5 py-3 rounded-xl flex items-center gap-3 shadow-2xs">
+          <span class="material-symbols-outlined text-primary text-2xl">timer</span>
           <div class="flex flex-col">
-            <span class="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider">Comienza</span>
-            <span class="font-headline-md text-headline-md text-on-surface font-bold tracking-tight">${timeText}</span>
+            <span class="font-label-sm text-[10px] text-on-surface-variant uppercase tracking-wider font-bold">Comienza</span>
+            <span class="font-headline-md text-base sm:text-lg text-on-surface font-extrabold tracking-tight">${timeText}</span>
           </div>
         </div>
-        <button onclick="editShift('${nextShift.id}')" class="bg-primary hover:bg-primary-container text-on-primary px-4 py-3 rounded-xl flex items-center gap-2 font-title-md text-title-md shadow-sm transition-all" type="button">
-          <span class="material-symbols-outlined text-xl">edit_calendar</span>
+        <button onclick="editShift('${nextShift.id}')" class="bg-primary hover:bg-primary-container text-on-primary px-4 py-3 rounded-xl flex items-center gap-2 font-title-md text-sm font-bold shadow-sm transition-all" type="button">
+          <span class="material-symbols-outlined text-lg">edit_calendar</span>
           <span>Modificar</span>
         </button>
       </div>
@@ -1418,17 +1752,16 @@ function renderHoursSummary() {
       let rowsHtml = '';
       shifts.forEach(s => {
         const hours = AuthDB.calculateShiftHours(s.startTime, s.endTime);
-        let typePill = 'bg-primary-fixed text-on-primary-fixed-variant';
-        let typeName = 'Mañana';
-        if (s.type === 'T') { typePill = 'bg-amber-100 text-amber-900'; typeName = 'Tarde'; }
-        if (s.type === 'N') { typePill = 'bg-tertiary-fixed text-on-tertiary-fixed-variant'; typeName = 'Noche'; }
-        if (s.type === 'G') { typePill = 'bg-red-100 text-red-900'; typeName = 'Guardia 24h'; }
+        const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
 
         rowsHtml += `
           <tr class="hover:bg-surface-container-low transition-colors border-b border-outline-variant/20">
             <td class="px-6 py-4 font-semibold text-on-surface">${s.date}</td>
             <td class="px-6 py-4">
-              <span class="${typePill} px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold uppercase">${typeName}</span>
+              <span class="${st.badgeClass} px-2.5 py-1 rounded-full font-label-sm text-[11px] font-bold uppercase inline-flex items-center gap-1">
+                <span class="material-symbols-outlined text-xs">${st.icon}</span>
+                ${st.label}
+              </span>
             </td>
             <td class="px-6 py-4 text-on-surface">${s.startTime} - ${s.endTime}</td>
             <td class="px-6 py-4 font-bold text-on-surface">${hours} h</td>
@@ -1492,10 +1825,8 @@ function exportCalendarICS() {
 
   // 1. Exportar Turnos
   shifts.forEach(s => {
-    let typeName = 'Turno Mañana';
-    if (s.type === 'T') typeName = 'Turno Tarde';
-    if (s.type === 'N') typeName = 'Turno Noche';
-    if (s.type === 'G') typeName = 'Guardia 24h';
+    const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
+    const typeName = `Turno ${st.label}`;
 
     // Manejar paso de medianoche
     let endDateStr = s.date;
@@ -1515,6 +1846,17 @@ function exportCalendarICS() {
     icsContent.push(`SUMMARY:🏥 ${typeName} (${s.service || 'UCI'})`);
     icsContent.push(`DESCRIPTION:${escapeICS(s.hospital || 'Hospital')} - ${escapeICS(s.service || 'UCI')}. Notas: ${escapeICS(s.notes || '')}`);
     icsContent.push(`LOCATION:${escapeICS(s.hospital || 'Hospital')}`);
+    // Alarmas VALARM para recordatorios activos
+    const shiftReminders = AuthDB.normalizeReminders(s.reminders, s.type);
+    shiftReminders.forEach(r => {
+      if (r.enabled !== false && Number(r.offsetMinutes) > 0) {
+        icsContent.push('BEGIN:VALARM');
+        icsContent.push('ACTION:DISPLAY');
+        icsContent.push(`DESCRIPTION:${escapeICS(r.label || 'Aviso de turno')}`);
+        icsContent.push(`TRIGGER:-PT${r.offsetMinutes}M`);
+        icsContent.push('END:VALARM');
+      }
+    });
     icsContent.push('END:VEVENT');
   });
 
@@ -1529,6 +1871,17 @@ function exportCalendarICS() {
     icsContent.push(`SUMMARY:🧘 ${escapeICS(c.title)} [${cat}]`);
     icsContent.push(`DESCRIPTION:Categoría: ${cat}. Notas: ${escapeICS(c.notes || '')}`);
     if (c.location) icsContent.push(`LOCATION:${escapeICS(c.location)}`);
+    // Alarmas VALARM para compromisos
+    const comReminders = AuthDB.normalizeReminders(c.reminders, 'commitmentDefault');
+    comReminders.forEach(r => {
+      if (r.enabled !== false && Number(r.offsetMinutes) > 0) {
+        icsContent.push('BEGIN:VALARM');
+        icsContent.push('ACTION:DISPLAY');
+        icsContent.push(`DESCRIPTION:${escapeICS(r.label || 'Aviso de compromiso')}`);
+        icsContent.push(`TRIGGER:-PT${r.offsetMinutes}M`);
+        icsContent.push('END:VALARM');
+      }
+    });
     icsContent.push('END:VEVENT');
   });
 
@@ -1558,44 +1911,226 @@ function escapeICS(str) {
 }
 
 // ==========================================
-// CONFIGURACIÓN DE NUBE (FIREBASE)
+// GESTIÓN DE DATOS JSON (EXPORTAR / IMPORTAR / VINCULAR)
 // ==========================================
-function openCloudConfigModal() {
-  const modal = document.getElementById('cloudConfigModal');
+function openDataModal(initialMode = null) {
+  const modal = document.getElementById('dataModal');
   if (!modal) return;
-  const cfg = AuthDB.getFirebaseConfig();
-  if (cfg) {
-    if (document.getElementById('fbApiKey')) document.getElementById('fbApiKey').value = cfg.apiKey || '';
-    if (document.getElementById('fbProjectId')) document.getElementById('fbProjectId').value = cfg.projectId || '';
-    if (document.getElementById('fbAuthDomain')) document.getElementById('fbAuthDomain').value = cfg.authDomain || '';
-    if (document.getElementById('fbAppId')) document.getElementById('fbAppId').value = cfg.appId || '';
-  }
   modal.classList.remove('hidden');
+  renderDataModalStatus();
+
+  if (initialMode === 'import') {
+    setTimeout(() => {
+      const fileInput = document.getElementById('dbImportFileInput');
+      if (fileInput) fileInput.focus();
+    }, 150);
+  }
 }
 
-function closeCloudConfigModal() {
-  const modal = document.getElementById('cloudConfigModal');
+function closeDataModal() {
+  const modal = document.getElementById('dataModal');
   if (modal) modal.classList.add('hidden');
 }
 
-function saveCloudConfig(event) {
-  event.preventDefault();
-  const apiKey = document.getElementById('fbApiKey')?.value.trim() || '';
-  const projectId = document.getElementById('fbProjectId')?.value.trim() || '';
-  const authDomain = document.getElementById('fbAuthDomain')?.value.trim() || '';
-  const appId = document.getElementById('fbAppId')?.value.trim() || '';
+function renderDataModalStatus() {
+  const statsEl = document.getElementById('dataModalStats');
+  const fileSectionEl = document.getElementById('dbFileLinkSection');
+  if (!window.JsonDB) return;
 
-  if (!apiKey || !projectId) {
-    AuthDB.saveFirebaseConfig(null);
-    showToast('Configuración eliminada. Operando en modo local.', 'info');
-  } else {
-    AuthDB.saveFirebaseConfig({ apiKey, projectId, authDomain, appId });
-    showToast('¡Configuración de Firebase guardada con éxito!', 'success');
+  const currentUser = AuthDB.getCurrentUser();
+  const stats = window.JsonDB.getStats(currentUser ? currentUser.id : null);
+  const lastExport = AuthDB.getLastExportAt();
+
+  if (statsEl) {
+    const exportText = lastExport
+      ? new Date(lastExport).toLocaleDateString()
+      : 'Sin copia reciente';
+    statsEl.innerHTML = `
+      <div class="p-2">
+        <span class="block text-lg font-bold text-primary">${stats.shifts}</span>
+        <span class="text-[11px] text-on-surface-variant font-medium">Turnos ${currentUser ? 'tuyos' : 'totales'}</span>
+      </div>
+      <div class="p-2 border-x border-outline-variant/40">
+        <span class="block text-lg font-bold text-primary">${stats.commitments}</span>
+        <span class="text-[11px] text-on-surface-variant font-medium">Compromisos</span>
+      </div>
+      <div class="p-2">
+        <span class="block text-xs font-bold text-on-surface truncate" title="${exportText}">${exportText}</span>
+        <span class="text-[11px] text-on-surface-variant font-medium">Último respaldo</span>
+      </div>
+    `;
   }
-  closeCloudConfigModal();
-  updateAuthUI();
-  renderCalendar();
-  renderUpcomingShifts();
+
+  if (fileSectionEl) {
+    const fileStatus = window.JsonDB.getFileStatus();
+    if (!fileStatus.supported) {
+      fileSectionEl.innerHTML = `
+        <div class="flex items-center gap-2 text-on-surface-variant font-medium text-xs">
+          <span class="material-symbols-outlined text-base">info</span>
+          <span>Guardado automático en archivo disponible en Chrome o Edge para computador. En este dispositivo puedes usar <strong>Exportar / Importar</strong>.</span>
+        </div>
+      `;
+    } else if (fileStatus.linked) {
+      const lastSaveText = fileStatus.lastSaveAt
+        ? new Date(fileStatus.lastSaveAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        : 'Al guardar cambios';
+      fileSectionEl.innerHTML = `
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-2 text-primary font-bold text-sm">
+            <span class="material-symbols-outlined text-lg">check_circle</span>
+            <span>Archivo local vinculado</span>
+          </div>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-primary/10 text-primary font-semibold">Auto-guardado activo</span>
+        </div>
+        <p class="text-xs text-on-surface-variant">
+          Archivo: <code class="font-bold text-on-surface">${escapeHTML(fileStatus.fileName || 'antiturno-db.json')}</code>
+          ${fileStatus.needsPermission ? ' · <span class="text-error font-bold">Requiere reactivar permiso tras recargar</span>' : ' · Guardado a las ' + lastSaveText}
+        </p>
+        <div class="flex gap-2 pt-1">
+          ${fileStatus.needsPermission ? `
+            <button type="button" onclick="handleReconnectFile()" class="py-1.5 px-3 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-xs">
+              Reactivar Permiso
+            </button>
+          ` : ''}
+          <button type="button" onclick="handleUnlinkFile()" class="py-1.5 px-3 rounded-xl bg-surface-container hover:bg-error-container text-on-surface hover:text-error text-xs font-semibold transition-colors">
+            Desvincular Archivo
+          </button>
+        </div>
+      `;
+    } else {
+      fileSectionEl.innerHTML = `
+        <div class="flex items-center gap-2 text-primary font-bold text-sm">
+          <span class="material-symbols-outlined text-lg">save_as</span>
+          <span>Vincular archivo .json en tu computador (Opcional)</span>
+        </div>
+        <p class="text-xs text-on-surface-variant leading-relaxed">
+          Si usas Chrome o Edge de escritorio, puedes vincular un archivo <code>antiturno-db.json</code> de tu disco. Cualquier cambio que hagas en la app se guardará automáticamente en él.
+        </p>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button type="button" onclick="handleLinkNewFile()" class="py-1.5 px-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-bold shadow-xs transition-all flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-sm">add</span>
+            <span>Crear y Vincular Archivo</span>
+          </button>
+          <button type="button" onclick="handleLinkExistingFile()" class="py-1.5 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold transition-all flex items-center gap-1.5">
+            <span class="material-symbols-outlined text-sm">folder_open</span>
+            <span>Abrir y Vincular Existente</span>
+          </button>
+        </div>
+      `;
+    }
+  }
+}
+
+function handleExportDB(mode = 'user') {
+  if (!window.JsonDB) return;
+  const user = AuthDB.getCurrentUser();
+  const userId = (mode === 'user' && user) ? user.id : null;
+  try {
+    const res = window.JsonDB.exportToFile(userId);
+    AuthDB.markExported();
+    renderDataModalStatus();
+    showToast(`Copia descargada: ${res.fileName}`, 'success');
+  } catch (err) {
+    showToast('Error al exportar: ' + err.message, 'error');
+  }
+}
+
+async function handleImportDB() {
+  const fileInput = document.getElementById('dbImportFileInput');
+  const modeSelect = document.getElementById('dbImportModeSelect');
+  if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+    showToast('Por favor selecciona un archivo .json para importar.', 'error');
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const mode = modeSelect ? modeSelect.value : 'merge';
+
+  try {
+    const text = await file.text();
+    const doc = window.JsonDB.parseImport(text);
+    const preview = window.JsonDB.previewImport(doc, mode);
+
+    const msg = mode === 'replace'
+      ? `Atención: Esta acción reemplazará toda tu base de datos actual con:\n- ${preview.users.incoming} usuario(s)\n- ${preview.shifts.incoming} turno(s)\n- ${preview.commitments.incoming} compromiso(s).\n\n¿Deseas continuar?`
+      : `Se importarán:\n- ${preview.shifts.toAdd} turnos nuevos (${preview.shifts.toUpdate} actualizados)\n- ${preview.commitments.toAdd} compromisos nuevos (${preview.commitments.toUpdate} actualizados).\n\n¿Deseas continuar?`;
+
+    if (!confirm(msg)) return;
+
+    const summary = window.JsonDB.importData(doc, mode);
+    AuthDB.checkSession();
+    updateAuthUI();
+    renderCalendar();
+    renderUpcomingShifts();
+    renderHeroCard();
+    renderPersonalView();
+    renderHoursSummary();
+    renderDataModalStatus();
+    fileInput.value = '';
+    showToast(`¡Importación exitosa! (${summary.shifts.added + summary.shifts.updated} turnos procesados).`, 'success');
+  } catch (err) {
+    showToast('Error al importar archivo: ' + err.message, 'error');
+  }
+}
+
+async function handleLinkNewFile() {
+  try {
+    await window.JsonDB.linkNewFile();
+    renderDataModalStatus();
+    showToast('¡Archivo vinculado! Los cambios se guardarán automáticamente en disco.', 'success');
+  } catch (err) {
+    if (err.name !== 'AbortError') showToast(err.message, 'error');
+  }
+}
+
+async function handleLinkExistingFile() {
+  try {
+    const mode = document.getElementById('dbImportModeSelect')?.value || 'merge';
+    await window.JsonDB.linkExistingFile(mode);
+    AuthDB.checkSession();
+    updateAuthUI();
+    renderCalendar();
+    renderUpcomingShifts();
+    renderHeroCard();
+    renderPersonalView();
+    renderHoursSummary();
+    renderDataModalStatus();
+    showToast('¡Archivo vinculado e importado con éxito!', 'success');
+  } catch (err) {
+    if (err.name !== 'AbortError') showToast(err.message, 'error');
+  }
+}
+
+async function handleReconnectFile() {
+  try {
+    const ok = await window.JsonDB.reconnectFile();
+    renderDataModalStatus();
+    if (ok) showToast('Permiso concedido para guardar en archivo vinculado.', 'success');
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
+}
+
+async function handleUnlinkFile() {
+  if (confirm('¿Deseas desvincular el archivo local? Tus turnos seguirán guardados en la app.')) {
+    await window.JsonDB.unlinkFile();
+    renderDataModalStatus();
+    showToast('Archivo desvinculado.', 'info');
+  }
+}
+
+function checkBackupReminderNotice() {
+  const user = AuthDB.getCurrentUser();
+  if (!user) return;
+  const shifts = AuthDB.getShifts();
+  if (shifts.length < 3) return;
+  const lastExport = AuthDB.getLastExportAt();
+  const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+  if (!lastExport || (Date.now() - new Date(lastExport).getTime() > sevenDaysMs)) {
+    setTimeout(() => {
+      showToast('💡 Te recomendamos descargar una copia de tus turnos desde "Mis datos (JSON)".', 'info');
+    }, 2500);
+  }
 }
 
 // ==========================================
@@ -1645,4 +2180,430 @@ function escapeHTML(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// ==========================================
+// EDITOR Y GESTOR DE RECORDATORIOS (PLAN 03)
+// ==========================================
+
+function formatReminderOffset(minutes) {
+  const m = Number(minutes) || 0;
+  if (m >= 1440 && m % 1440 === 0) return `${m / 1440} día(s)`;
+  if (m >= 60 && m % 60 === 0) return `${m / 60} h`;
+  return `${m} min`;
+}
+
+function computeReminderPreviewText(dateStr, timeStr, offsetMinutes, anchor = 'start') {
+  if (!dateStr || !timeStr || typeof ReminderService === 'undefined') return '';
+  try {
+    const d = ReminderService.computeTriggerDate(dateStr, timeStr, offsetMinutes, anchor);
+    if (!d) return '';
+    const dias = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const diaNom = dias[d.getDay()];
+    const diaNum = d.getDate();
+    const meses = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const mesNom = meses[d.getMonth()];
+    const hora = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return `Aviso: ${diaNom} ${diaNum} ${mesNom} ${hora}`;
+  } catch (e) {
+    return '';
+  }
+}
+
+function renderShiftRemindersEditor() {
+  const container = document.getElementById('shiftRemindersList');
+  if (!container) return;
+
+  const dateVal = document.getElementById('shiftDateInput')?.value || formatLocalDate(new Date());
+  const startVal = document.getElementById('shiftStartTimeInput')?.value || '07:00';
+  const endVal = document.getElementById('shiftEndTimeInput')?.value || '15:00';
+
+  if (!AppState.shiftReminders || AppState.shiftReminders.length === 0) {
+    container.innerHTML = `
+      <div class="p-3 rounded-xl bg-surface-container-low border border-dashed border-outline-variant/40 text-center text-xs text-on-surface-variant">
+        <span>No hay recordatorios configurados para este turno. Usa los chips rápidos arriba o añade uno personalizado.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const categoryIcons = {
+    salida: 'directions_walk',
+    comida: 'lunch_dining',
+    descanso: 'bedtime',
+    hidratacion: 'water_drop',
+    medicacion: 'medication',
+    personalizado: 'notifications'
+  };
+
+  container.innerHTML = AppState.shiftReminders.map((r, idx) => {
+    const targetTime = r.anchor === 'end' ? endVal : startVal;
+    const preview = computeReminderPreviewText(dateVal, targetTime, r.offsetMinutes, r.anchor);
+    const icon = categoryIcons[r.category] || 'notifications';
+
+    return `
+      <div class="p-3 rounded-xl bg-surface-container-low border border-outline-variant/40 flex flex-col gap-2 transition-all">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 flex-1">
+            <input type="checkbox" ${r.enabled !== false ? 'checked' : ''} onchange="toggleShiftReminder(${idx}, this.checked)" class="w-4 h-4 accent-primary rounded cursor-pointer" title="Activar/desactivar este aviso"/>
+            <span class="material-symbols-outlined text-primary text-lg">${icon}</span>
+            <input type="text" value="${escapeHTML(r.label || '')}" onchange="updateShiftReminderField(${idx}, 'label', this.value)" placeholder="Descripción del aviso (ej: Salir de casa)" class="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-2.5 py-1 text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary font-medium"/>
+          </div>
+          <button type="button" onclick="removeShiftReminder(${idx})" class="p-1 rounded-lg hover:bg-error-container/30 text-on-surface-variant hover:text-error transition-colors cursor-pointer" title="Eliminar recordatorio">
+            <span class="material-symbols-outlined text-base">delete</span>
+          </button>
+        </div>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 text-xs pt-1 border-t border-outline-variant/20">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-on-surface-variant text-[11px]">Anticipación:</span>
+            <input type="number" min="0" max="10080" value="${r.offsetMinutes}" onchange="updateShiftReminderField(${idx}, 'offsetMinutes', Number(this.value))" class="w-16 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-2 py-0.5 text-xs text-on-surface outline-none focus:ring-1 focus:ring-primary text-center font-bold"/>
+            <span class="text-on-surface-variant text-[11px]">minutos (${formatReminderOffset(r.offsetMinutes)})</span>
+            
+            <select onchange="updateShiftReminderField(${idx}, 'anchor', this.value)" class="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-2 py-0.5 text-[11px] text-on-surface outline-none">
+              <option value="start" ${r.anchor === 'start' ? 'selected' : ''}>antes del inicio</option>
+              <option value="end" ${r.anchor === 'end' ? 'selected' : ''}>antes del fin</option>
+            </select>
+
+            <select onchange="updateShiftReminderField(${idx}, 'category', this.value)" class="bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-2 py-0.5 text-[11px] text-on-surface outline-none">
+              <option value="salida" ${r.category === 'salida' ? 'selected' : ''}>🚶 Trayecto</option>
+              <option value="comida" ${r.category === 'comida' ? 'selected' : ''}>🍱 Comida/Uniforme</option>
+              <option value="descanso" ${r.category === 'descanso' ? 'selected' : ''}>🛌 Descanso</option>
+              <option value="hidratacion" ${r.category === 'hidratacion' ? 'selected' : ''}>💧 Hidratación</option>
+              <option value="medicacion" ${r.category === 'medicacion' ? 'selected' : ''}>💊 Salud</option>
+              <option value="personalizado" ${r.category === 'personalizado' ? 'selected' : ''}>📌 Personalizado</option>
+            </select>
+          </div>
+
+          <span class="text-[11px] text-primary font-semibold">${preview}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function addQuickReminder(offsetMinutes, anchor = 'start', label = 'Recordatorio', category = 'personalizado') {
+  AppState.shiftReminders.push({
+    id: 'rem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    offsetMinutes: Number(offsetMinutes),
+    anchor,
+    label,
+    category,
+    enabled: true,
+    firedAt: null
+  });
+  renderShiftRemindersEditor();
+}
+
+function addNewCustomReminder(target = 'shift') {
+  const newRem = {
+    id: 'rem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    offsetMinutes: 120,
+    anchor: 'start',
+    label: 'Nuevo recordatorio',
+    category: 'personalizado',
+    enabled: true,
+    firedAt: null
+  };
+  if (target === 'shift') {
+    AppState.shiftReminders.push(newRem);
+    renderShiftRemindersEditor();
+  } else {
+    AppState.commitmentReminders.push(newRem);
+    renderCommitmentRemindersEditor();
+  }
+}
+
+function removeShiftReminder(idx) {
+  AppState.shiftReminders.splice(idx, 1);
+  renderShiftRemindersEditor();
+}
+
+function toggleShiftReminder(idx, checked) {
+  if (AppState.shiftReminders[idx]) {
+    AppState.shiftReminders[idx].enabled = checked;
+    renderShiftRemindersEditor();
+  }
+}
+
+function updateShiftReminderField(idx, field, value) {
+  if (AppState.shiftReminders[idx]) {
+    AppState.shiftReminders[idx][field] = value;
+    renderShiftRemindersEditor();
+  }
+}
+
+function applyShiftTemplateReminders(type = null) {
+  const targetType = type || AppState.activeShiftType || 'M';
+  const prefs = AuthDB.getReminderPrefs();
+  const tpl = (prefs.templates && prefs.templates[targetType]) || [];
+  AppState.shiftReminders = JSON.parse(JSON.stringify(tpl));
+  renderShiftRemindersEditor();
+}
+
+// ==========================================
+// RECORDATORIOS EN COMPROMISOS PERSONALES
+// ==========================================
+
+function renderCommitmentRemindersEditor() {
+  const container = document.getElementById('commitmentRemindersList');
+  if (!container) return;
+
+  if (!AppState.commitmentReminders || AppState.commitmentReminders.length === 0) {
+    container.innerHTML = `
+      <p class="text-[11px] text-on-surface-variant italic">Sin avisos para este compromiso.</p>
+    `;
+    return;
+  }
+
+  container.innerHTML = AppState.commitmentReminders.map((r, idx) => {
+    return `
+      <div class="flex items-center justify-between gap-2 p-2 rounded-xl bg-surface-container-low border border-outline-variant/30 text-xs">
+        <div class="flex items-center gap-2 flex-1">
+          <input type="checkbox" ${r.enabled !== false ? 'checked' : ''} onchange="AppState.commitmentReminders[${idx}].enabled = this.checked;" class="w-3.5 h-3.5 accent-primary rounded cursor-pointer"/>
+          <input type="text" value="${escapeHTML(r.label || '')}" onchange="AppState.commitmentReminders[${idx}].label = this.value;" class="flex-1 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-2 py-0.5 text-xs text-on-surface outline-none"/>
+          <input type="number" value="${r.offsetMinutes}" onchange="AppState.commitmentReminders[${idx}].offsetMinutes = Number(this.value);" class="w-14 bg-surface-container-lowest border border-outline-variant/40 rounded-lg px-1 py-0.5 text-xs text-center font-bold outline-none"/>
+          <span class="text-[10px] text-on-surface-variant">min antes</span>
+        </div>
+        <button type="button" onclick="removeCommitmentReminder(${idx})" class="text-on-surface-variant hover:text-error p-1 cursor-pointer">
+          <span class="material-symbols-outlined text-sm">close</span>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+function addQuickReminderCommitment(offsetMinutes, label) {
+  AppState.commitmentReminders.push({
+    id: 'rem_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+    offsetMinutes: Number(offsetMinutes),
+    anchor: 'start',
+    label,
+    category: 'personalizado',
+    enabled: true,
+    firedAt: null
+  });
+  renderCommitmentRemindersEditor();
+}
+
+function removeCommitmentReminder(idx) {
+  AppState.commitmentReminders.splice(idx, 1);
+  renderCommitmentRemindersEditor();
+}
+
+// ==========================================
+// WIDGET DASHBOARD: PRÓXIMOS RECORDATORIOS
+// ==========================================
+
+function renderUpcomingReminders() {
+  const container = document.getElementById('upcomingRemindersList');
+  if (!container || typeof ReminderService === 'undefined') return;
+
+  const upcoming = ReminderService.getUpcoming(48);
+
+  if (upcoming.length === 0) {
+    container.innerHTML = `
+      <div class="p-4 rounded-xl bg-surface-container-low border border-outline-variant/20 text-center flex flex-col items-center gap-1.5 text-on-surface-variant">
+        <span class="material-symbols-outlined text-2xl text-primary/60">notifications_paused</span>
+        <p class="text-xs font-medium">No hay avisos programados para las próximas 48h.</p>
+        <span class="text-[11px] text-on-surface-variant/80">Se activarán según tus plantillas y turnos.</span>
+      </div>
+    `;
+    return;
+  }
+
+  const categoryIcons = {
+    salida: 'directions_walk',
+    comida: 'lunch_dining',
+    descanso: 'bedtime',
+    hidratacion: 'water_drop',
+    medicacion: 'medication',
+    personalizado: 'notifications'
+  };
+
+  container.innerHTML = upcoming.slice(0, 5).map(item => {
+    const icon = categoryIcons[item.category] || 'notifications';
+    const hora = item.triggerDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const now = new Date();
+    let diaLabel = '';
+    if (item.triggerDate.toDateString() === now.toDateString()) {
+      diaLabel = 'Hoy';
+    } else {
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      if (item.triggerDate.toDateString() === tomorrow.toDateString()) {
+        diaLabel = 'Mañana';
+      } else {
+        diaLabel = item.triggerDate.toLocaleDateString([], { weekday: 'short', day: 'numeric' });
+      }
+    }
+
+    return `
+      <div class="p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 flex items-center justify-between gap-3 transition-colors hover:bg-surface-container">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-8 h-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center shrink-0">
+            <span class="material-symbols-outlined text-base">${icon}</span>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-bold text-on-surface truncate">${escapeHTML(item.label)}</p>
+            <p class="text-[11px] text-on-surface-variant truncate">${escapeHTML(item.itemTitle)}</p>
+          </div>
+        </div>
+        <div class="text-right shrink-0">
+          <span class="inline-block px-2 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant text-[10px] font-bold">${diaLabel} ${hora}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+// ==========================================
+// MODAL DE PREFERENCIAS DE RECORDATORIOS
+// ==========================================
+
+function openReminderPrefsModal() {
+  const modal = document.getElementById('reminderPrefsModal');
+  if (!modal) return;
+
+  const prefs = AuthDB.getReminderPrefs();
+  renderPermissionBoxUI();
+
+  const soundCb = document.getElementById('prefSoundCheckbox');
+  if (soundCb) soundCb.checked = prefs.sound !== false;
+
+  const notifyChangesCb = document.getElementById('prefNotifyChangesCheckbox');
+  if (notifyChangesCb) notifyChangesCb.checked = prefs.notifyOnChanges !== false;
+
+  const quietCb = document.getElementById('prefQuietEnabledCheckbox');
+  if (quietCb) quietCb.checked = !!prefs.quietHours?.enabled;
+
+  const quietFrom = document.getElementById('prefQuietFromInput');
+  if (quietFrom) quietFrom.value = prefs.quietHours?.from || '22:00';
+
+  const quietTo = document.getElementById('prefQuietToInput');
+  if (quietTo) quietTo.value = prefs.quietHours?.to || '06:00';
+
+  modal.classList.remove('hidden');
+}
+
+function closeReminderPrefsModal() {
+  const modal = document.getElementById('reminderPrefsModal');
+  if (modal) modal.classList.add('hidden');
+}
+
+function renderPermissionBoxUI() {
+  const box = document.getElementById('notifPermissionBox');
+  if (!box || typeof ReminderService === 'undefined') return;
+
+  const status = ReminderService.getPermissionStatus();
+
+  if (status === 'granted') {
+    box.innerHTML = `
+      <div class="flex items-center gap-2.5 text-primary">
+        <span class="material-symbols-outlined text-2xl">check_circle</span>
+        <div>
+          <span class="text-xs font-bold text-on-surface block">Notificaciones del sistema activadas</span>
+          <span class="text-[11px] text-on-surface-variant">Recibirás alertas en tu escritorio o pantalla de bloqueo</span>
+        </div>
+      </div>
+      <span class="px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-bold shrink-0">Concedido</span>
+    `;
+  } else if (status === 'denied') {
+    box.innerHTML = `
+      <div class="flex items-center gap-2.5 text-error">
+        <span class="material-symbols-outlined text-2xl">notifications_off</span>
+        <div>
+          <span class="text-xs font-bold text-on-surface block">Notificaciones bloqueadas en el navegador</span>
+          <span class="text-[11px] text-on-surface-variant">Actívalas en el candado de la barra de direcciones de tu navegador</span>
+        </div>
+      </div>
+      <span class="px-2.5 py-1 rounded-full bg-error-container text-error text-xs font-bold shrink-0">Bloqueado</span>
+    `;
+  } else {
+    box.innerHTML = `
+      <div class="flex items-center gap-2.5">
+        <span class="material-symbols-outlined text-primary text-2xl">notifications</span>
+        <div>
+          <span class="text-xs font-bold text-on-surface block">Notificaciones del sistema</span>
+          <span class="text-[11px] text-on-surface-variant">Permite a AntiTurno avisarte antes de cada guardia</span>
+        </div>
+      </div>
+      <button type="button" onclick="requestNotificationPermissionFromUI()" class="px-3 py-1.5 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-xs hover:bg-primary-container transition-colors shrink-0 cursor-pointer">
+        Activar Avisos
+      </button>
+    `;
+  }
+}
+
+async function requestNotificationPermissionFromUI() {
+  try {
+    const res = await ReminderService.requestPermission();
+    renderPermissionBoxUI();
+    if (res === 'granted') {
+      showToast('¡Notificaciones activadas con éxito!', 'success');
+      ReminderService.playChime();
+    } else {
+      showToast('Permiso de notificaciones no concedido.', 'info');
+    }
+  } catch (e) {
+    showToast(e.message, 'warning');
+  }
+}
+
+function testReminderAlert() {
+  if (typeof ReminderService === 'undefined') return;
+  ReminderService.playChime();
+  if (ReminderService.getPermissionStatus() === 'granted') {
+    try {
+      new Notification('AntiTurno: Recordatorio de Prueba', {
+        body: '¡Excelente! Los recordatorios clínicos funcionan con sonido y notificación del sistema.',
+        tag: 'test-reminder'
+      });
+    } catch (e) {}
+  }
+  showToast('⏰ ¡Aviso de prueba ejecutado con sonido y toast!', 'success');
+}
+
+function saveReminderPrefsFromUI() {
+  const sound = document.getElementById('prefSoundCheckbox')?.checked ?? true;
+  const notifyOnChanges = document.getElementById('prefNotifyChangesCheckbox')?.checked ?? true;
+  const quietEnabled = document.getElementById('prefQuietEnabledCheckbox')?.checked ?? false;
+  const quietFrom = document.getElementById('prefQuietFromInput')?.value || '22:00';
+  const quietTo = document.getElementById('prefQuietToInput')?.value || '06:00';
+
+  const currentPrefs = AuthDB.getReminderPrefs();
+  const updated = {
+    ...currentPrefs,
+    sound,
+    notifyOnChanges,
+    quietHours: {
+      enabled: quietEnabled,
+      from: quietFrom,
+      to: quietTo
+    }
+  };
+
+  AuthDB.saveReminderPrefs(updated);
+  closeReminderPrefsModal();
+  renderUpcomingReminders();
+  showToast('¡Preferencias de recordatorios guardadas!', 'success');
+}
+
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    AppState,
+    SHIFT_TYPES,
+    REST_TYPE,
+    COMMITMENT_CATEGORIES,
+    selectShiftType,
+    setCalendarFilter,
+    getShiftBadgeHtml,
+    renderCalendar,
+    renderCalendarFilters,
+    renderCalendarLegend,
+    renderCalendarMonthSummary,
+    renderHeroCard,
+    renderUpcomingShifts,
+    renderHoursSummary
+  };
 }

@@ -1,208 +1,52 @@
 /**
  * AntiTurno - Autenticación Segura y Base de Datos de Turnos y Vida Personal
- * Soporta Firebase Cloud (Auth & Firestore) para persistencia y sincronización entre dispositivos.
- * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico) para modo local/offline.
+ * Persistencia en una base de datos JSON local (ver js/json-db.js → AntiTurnoDB), sin servicios externos.
+ * Implementa Web Cryptography API (PBKDF2-HMAC-SHA256 con 100.000 iteraciones + Salt criptográfico).
  * CRUD completo de Turnos Clínicos y Compromisos Personales / Autocuidado.
  * Algoritmo de Detección y Protección Anti-Cruces (Turnos vs Compromisos vs Descanso post-guardia).
  * Compatible con HTTPS (GitHub Pages), localhost y apertura local file://.
  */
 
 class AuthDBService {
-  constructor() {
-    this.STORAGE_USERS_KEY = 'cuidadosync_users_v1';
-    this.STORAGE_SHIFTS_KEY = 'cuidadosync_shifts_v1';
-    this.STORAGE_COMMITMENTS_KEY = 'cuidadosync_commitments_v1';
-    this.STORAGE_SESSION_KEY = 'cuidadosync_session_v1';
-    this.STORAGE_FIREBASE_KEY = 'cuidadosync_firebase_config_v1';
-    
+  constructor(db) {
+    this.db = db || window.JsonDB;
+
+    // La sesión y el último correo NO forman parte de la base de datos exportable.
+    this.STORAGE_SESSION_KEY = 'antiturno_session_v2';
+    this.STORAGE_LAST_EMAIL_KEY = 'antiturno_last_email_v1';
+    this.STORAGE_LAST_EXPORT_KEY = 'antiturno_last_export_v1';
+    this.LEGACY_SESSION_KEY = 'cuidadosync_session_v1';
+
     this.currentUser = null;
-    this.isFirebaseReady = false;
-    this.firebaseAuth = null;
-    this.firestore = null;
 
     this.init();
   }
 
   init() {
-    this.initFirebase();
+    this.migrateLegacySession();
     this.checkSession();
   }
 
-  // ==========================================
-  // INICIALIZACIÓN Y CONFIGURACIÓN FIREBASE CLOUD
-  // ==========================================
-  initFirebase() {
+  /** Conserva la sesión iniciada con la versión anterior (si el usuario existe en la base JSON). */
+  migrateLegacySession() {
     try {
-      const cfg = this.getFirebaseConfig();
-      if (cfg && cfg.apiKey && cfg.projectId && window.firebase && window.firebase.initializeApp) {
-        if (!firebase.apps || !firebase.apps.length) {
-          firebase.initializeApp(cfg);
-        }
-        this.firebaseAuth = firebase.auth();
-        this.firestore = firebase.firestore();
-        this.isFirebaseReady = true;
-
-        // Listener en tiempo real del estado de autenticación de Firebase
-        this.firebaseAuth.onAuthStateChanged(async (fbUser) => {
-          if (fbUser) {
-            let name = fbUser.displayName || fbUser.email.split('@')[0];
-            try {
-              const doc = await this.firestore.collection('users').doc(fbUser.uid).get();
-              if (doc.exists && doc.data() && doc.data().name) {
-                name = doc.data().name;
-              }
-            } catch (e) {
-              console.warn('Error leyendo perfil de usuario en Firestore:', e);
-            }
-
-            this.currentUser = {
-              id: fbUser.uid,
-              name: name,
-              email: fbUser.email
-            };
-
-            this.createSession(this.currentUser, true);
-            await this.pullUserDataFromFirebase(fbUser.uid);
-            window.dispatchEvent(new CustomEvent('antiturno-data-synced'));
-          }
-        });
-      } else {
-        this.isFirebaseReady = false;
+      if (localStorage.getItem(this.STORAGE_SESSION_KEY)) return;
+      const legacy = localStorage.getItem(this.LEGACY_SESSION_KEY);
+      if (!legacy) return;
+      const session = JSON.parse(legacy);
+      if (session && session.email && !localStorage.getItem(this.STORAGE_LAST_EMAIL_KEY)) {
+        localStorage.setItem(this.STORAGE_LAST_EMAIL_KEY, session.email);
+      }
+      if (session && session.userId && this.findUserById(session.userId) && Date.now() < session.expiresAt) {
+        localStorage.setItem(this.STORAGE_SESSION_KEY, JSON.stringify(session));
       }
     } catch (e) {
-      console.warn('Firebase no inicializado (modo local activo):', e);
-      this.isFirebaseReady = false;
+      console.warn('No se pudo migrar la sesión anterior:', e);
     }
   }
 
-  getFirebaseConfig() {
-    // 1. Revisar si fue definido en js/firebase-config.js
-    if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.FIREBASE_CONFIG.projectId) {
-      return window.FIREBASE_CONFIG;
-    }
-    // 2. Revisar si fue ingresado en la interfaz y guardado en localStorage
-    try {
-      const data = localStorage.getItem(this.STORAGE_FIREBASE_KEY);
-      return data ? JSON.parse(data) : null;
-    } catch (e) {
-      return null;
-    }
-  }
-
-  saveFirebaseConfig(config) {
-    if (!config) {
-      localStorage.removeItem(this.STORAGE_FIREBASE_KEY);
-      this.isFirebaseReady = false;
-    } else {
-      localStorage.setItem(this.STORAGE_FIREBASE_KEY, JSON.stringify(config));
-      this.initFirebase();
-    }
-  }
-
-  // ==========================================
-  // SINCRONIZACIÓN NUBE (DESCARGA Y SUBIDA)
-  // ==========================================
-  async pullUserDataFromFirebase(userId) {
-    if (!this.isFirebaseReady || !this.firestore || !userId) return;
-    try {
-      // 1. Descargar turnos del usuario desde Firestore
-      const shiftsSnap = await this.firestore.collection('users').doc(userId).collection('shifts').get();
-      const remoteShifts = [];
-      shiftsSnap.forEach(doc => {
-        remoteShifts.push(doc.data());
-      });
-
-      if (remoteShifts.length > 0) {
-        // Mantener turnos de otros usuarios locales y reemplazar los de este usuario con los de la nube
-        const otherShifts = this.getAllShiftsFromStorage().filter(s => s.userId !== userId);
-        this.saveAllShiftsToStorage([...otherShifts, ...remoteShifts]);
-      } else {
-        // Si la nube está vacía pero hay turnos locales creados antes de conectar, subirlos a la nube
-        const localShifts = this.getShifts();
-        for (const s of localShifts) {
-          await this.syncShiftToFirebase(s);
-        }
-      }
-
-      // 2. Descargar compromisos personales del usuario desde Firestore
-      const comSnap = await this.firestore.collection('users').doc(userId).collection('commitments').get();
-      const remoteComs = [];
-      comSnap.forEach(doc => {
-        remoteComs.push(doc.data());
-      });
-
-      if (remoteComs.length > 0) {
-        const otherComs = this.getAllCommitmentsFromStorage().filter(c => c.userId !== userId);
-        this.saveAllCommitmentsToStorage([...otherComs, ...remoteComs]);
-      } else {
-        const localComs = this.getCommitments();
-        for (const c of localComs) {
-          await this.syncCommitmentToFirebase(c);
-        }
-      }
-    } catch (err) {
-      console.warn('Error sincronizando datos desde Firestore:', err);
-    }
-  }
-
-  async syncShiftToFirebase(shift) {
-    if (this.isFirebaseReady && this.firestore && this.currentUser && shift) {
-      try {
-        await this.firestore
-          .collection('users')
-          .doc(this.currentUser.id)
-          .collection('shifts')
-          .doc(shift.id)
-          .set(shift, { merge: true });
-      } catch (e) {
-        console.warn('Error guardando turno en Firebase:', e);
-      }
-    }
-  }
-
-  async deleteShiftFromFirebase(shiftId) {
-    if (this.isFirebaseReady && this.firestore && this.currentUser) {
-      try {
-        await this.firestore
-          .collection('users')
-          .doc(this.currentUser.id)
-          .collection('shifts')
-          .doc(shiftId)
-          .delete();
-      } catch (e) {
-        console.warn('Error eliminando turno en Firebase:', e);
-      }
-    }
-  }
-
-  async syncCommitmentToFirebase(commitment) {
-    if (this.isFirebaseReady && this.firestore && this.currentUser && commitment) {
-      try {
-        await this.firestore
-          .collection('users')
-          .doc(this.currentUser.id)
-          .collection('commitments')
-          .doc(commitment.id)
-          .set(commitment, { merge: true });
-      } catch (e) {
-        console.warn('Error guardando compromiso en Firebase:', e);
-      }
-    }
-  }
-
-  async deleteCommitmentFromFirebase(commitmentId) {
-    if (this.isFirebaseReady && this.firestore && this.currentUser) {
-      try {
-        await this.firestore
-          .collection('users')
-          .doc(this.currentUser.id)
-          .collection('commitments')
-          .doc(commitmentId)
-          .delete();
-      } catch (e) {
-        console.warn('Error eliminando compromiso en Firebase:', e);
-      }
-    }
+  getAuthMode() {
+    return 'local-json';
   }
 
   // ==========================================
@@ -337,20 +181,19 @@ class AuthDBService {
   // GESTIÓN DE USUARIOS Y AUTENTICACIÓN
   // ==========================================
   getAllUsers() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_USERS_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.error('Error al leer usuarios de localStorage:', e);
-      return [];
-    }
+    return this.db.getCollection('users');
   }
 
-  saveAllUsers(users) {
-    localStorage.setItem(this.STORAGE_USERS_KEY, JSON.stringify(users));
+  findUserByEmail(email) {
+    const clean = (email || '').trim().toLowerCase();
+    return this.db.findOne('users', u => u.email === clean);
   }
 
-  async register({ name, email, password }) {
+  findUserById(id) {
+    return this.db.findOne('users', u => u.id === id);
+  }
+
+  async register({ name, email, password, rememberEmail = true, rememberMe = true }) {
     if (!name || name.trim().length < 2) {
       throw new Error('Por favor ingresa un nombre válido (al menos 2 caracteres).');
     }
@@ -363,52 +206,13 @@ class AuthDBService {
       throw new Error('La contraseña debe tener al menos 6 caracteres.');
     }
 
-    // 1. Si Firebase está activo, registrar en la nube
-    if (this.isFirebaseReady && this.firebaseAuth) {
-      try {
-        const cred = await this.firebaseAuth.createUserWithEmailAndPassword(cleanEmail, password);
-        const fbUser = cred.user;
-        await fbUser.updateProfile({ displayName: name.trim() });
-
-        const userData = {
-          id: fbUser.uid,
-          name: name.trim(),
-          email: cleanEmail,
-          createdAt: new Date().toISOString()
-        };
-
-        await this.firestore.collection('users').doc(fbUser.uid).set(userData);
-
-        this.currentUser = userData;
-        this.createSession(userData, true);
-
-        // Subir turnos locales pendientes si existieran
-        const localShifts = this.getAllShiftsFromStorage().filter(s => !s.userId || s.userId === 'local');
-        for (const s of localShifts) {
-          s.userId = fbUser.uid;
-          await this.syncShiftToFirebase(s);
-        }
-
-        return userData;
-      } catch (fbErr) {
-        if (fbErr.code === 'auth/email-already-in-use') {
-          throw new Error('Ya existe una cuenta registrada con este correo en Firebase.');
-        } else if (fbErr.code === 'auth/weak-password') {
-          throw new Error('La contraseña es demasiado débil (mínimo 6 caracteres).');
-        } else {
-          throw new Error(fbErr.message || 'Error al registrar la cuenta en Firebase.');
-        }
-      }
-    }
-
-    // 2. Modo local PBKDF2
-    const users = this.getAllUsers();
-    if (users.some(u => u.email === cleanEmail)) {
+    if (this.findUserByEmail(cleanEmail)) {
       throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
     }
 
     const salt = this.generateSalt();
     const hash = await this.hashPassword(password, salt);
+    const now = new Date().toISOString();
 
     const newUser = {
       id: 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
@@ -416,66 +220,27 @@ class AuthDBService {
       email: cleanEmail,
       salt: salt,
       hash: hash,
-      createdAt: new Date().toISOString()
+      createdAt: now,
+      updatedAt: now,
+      settings: { rememberEmail: !!rememberEmail }
     };
 
-    users.push(newUser);
-    this.saveAllUsers(users);
+    this.db.insert('users', newUser);
 
-    this.createSession(newUser);
+    this.handleRememberEmail(cleanEmail, rememberEmail);
+    this.createSession(newUser, rememberMe);
     return this.sanitizeUser(newUser);
   }
 
-  async login({ email, password, rememberMe = true }) {
+  async login({ email, password, rememberMe = true, rememberEmail = true }) {
     const cleanEmail = (email || '').trim().toLowerCase();
     if (!cleanEmail || !password) {
       throw new Error('Por favor ingresa correo y contraseña.');
     }
 
-    // 1. Si Firebase está activo, autenticar contra la nube y restaurar datos
-    if (this.isFirebaseReady && this.firebaseAuth) {
-      try {
-        const cred = await this.firebaseAuth.signInWithEmailAndPassword(cleanEmail, password);
-        const fbUser = cred.user;
-
-        let name = fbUser.displayName || cleanEmail.split('@')[0];
-        try {
-          const doc = await this.firestore.collection('users').doc(fbUser.uid).get();
-          if (doc.exists && doc.data() && doc.data().name) {
-            name = doc.data().name;
-          }
-        } catch (e) {}
-
-        const user = {
-          id: fbUser.uid,
-          name: name,
-          email: cleanEmail,
-          createdAt: fbUser.metadata?.creationTime || new Date().toISOString()
-        };
-
-        this.currentUser = user;
-        this.createSession(user, rememberMe);
-
-        // Descargar turnos y compromisos vinculados a esta cuenta desde Firestore
-        await this.pullUserDataFromFirebase(fbUser.uid);
-
-        return user;
-      } catch (fbErr) {
-        if (fbErr.code === 'auth/user-not-found' || fbErr.code === 'auth/invalid-credential') {
-          throw new Error('No se encontró ninguna cuenta con este correo o la contraseña es inválida.');
-        } else if (fbErr.code === 'auth/wrong-password') {
-          throw new Error('Contraseña incorrecta. Por favor intenta de nuevo.');
-        } else {
-          throw new Error(fbErr.message || 'Error al iniciar sesión con Firebase.');
-        }
-      }
-    }
-
-    // 2. Modo local PBKDF2
-    const users = this.getAllUsers();
-    const user = users.find(u => u.email === cleanEmail);
+    const user = this.findUserByEmail(cleanEmail);
     if (!user) {
-      throw new Error('No existe ninguna cuenta con este correo.');
+      throw new Error('No existe ninguna cuenta con este correo en este dispositivo. Si la creaste en otro equipo, importa tu copia de seguridad (.json).');
     }
 
     const inputHash = await this.hashPassword(password, user.salt);
@@ -483,10 +248,74 @@ class AuthDBService {
       throw new Error('Contraseña incorrecta. Por favor intenta de nuevo.');
     }
 
+    this.handleRememberEmail(cleanEmail, rememberEmail);
     this.createSession(user, rememberMe);
     return this.sanitizeUser(user);
   }
 
+  async changePassword(currentPassword, newPassword) {
+    const session = this.getCurrentUser();
+    if (!session) throw new Error('Debes iniciar sesión.');
+    const user = this.findUserById(session.id);
+    if (!user) throw new Error('No se encontró la cuenta.');
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('La nueva contraseña debe tener al menos 6 caracteres.');
+    }
+    const currentHash = await this.hashPassword(currentPassword || '', user.salt);
+    if (currentHash !== user.hash) {
+      throw new Error('La contraseña actual no es correcta.');
+    }
+    const salt = this.generateSalt();
+    const hash = await this.hashPassword(newPassword, salt);
+    this.db.update('users', user.id, { salt, hash, updatedAt: new Date().toISOString() });
+    return true;
+  }
+
+  async deleteAccount(password) {
+    const session = this.getCurrentUser();
+    if (!session) throw new Error('Debes iniciar sesión.');
+    const user = this.findUserById(session.id);
+    if (!user) throw new Error('No se encontró la cuenta.');
+    const inputHash = await this.hashPassword(password || '', user.salt);
+    if (inputHash !== user.hash) {
+      throw new Error('Contraseña incorrecta. La cuenta no fue eliminada.');
+    }
+    this.db.removeWhere('shifts', s => s.userId === user.id);
+    this.db.removeWhere('commitments', c => c.userId === user.id);
+    this.db.remove('users', user.id);
+    if (this.getLastEmail() === user.email) this.clearLastEmail();
+    await this.logout();
+    return true;
+  }
+
+  // ---------- Último correo recordado ----------
+  handleRememberEmail(email, remember) {
+    if (remember) this.saveLastEmail(email);
+    else this.clearLastEmail();
+  }
+
+  saveLastEmail(email) {
+    try { localStorage.setItem(this.STORAGE_LAST_EMAIL_KEY, (email || '').trim().toLowerCase()); } catch (e) {}
+  }
+
+  getLastEmail() {
+    try { return localStorage.getItem(this.STORAGE_LAST_EMAIL_KEY) || ''; } catch (e) { return ''; }
+  }
+
+  clearLastEmail() {
+    try { localStorage.removeItem(this.STORAGE_LAST_EMAIL_KEY); } catch (e) {}
+  }
+
+  // ---------- Copias de seguridad ----------
+  markExported() {
+    try { localStorage.setItem(this.STORAGE_LAST_EXPORT_KEY, new Date().toISOString()); } catch (e) {}
+  }
+
+  getLastExportAt() {
+    try { return localStorage.getItem(this.STORAGE_LAST_EXPORT_KEY); } catch (e) { return null; }
+  }
+
+  // ---------- Sesión ----------
   createSession(user, rememberMe = true) {
     const session = {
       token: 'tok_' + Date.now() + '_' + Math.random().toString(36).substr(2, 10),
@@ -508,15 +337,14 @@ class AuthDBService {
         return null;
       }
       const session = JSON.parse(sessionData);
-      if (Date.now() > session.expiresAt) {
-        this.logout();
+      const user = this.findUserById(session.userId);
+      if (Date.now() > session.expiresAt || !user) {
+        // Sesión vencida o la cuenta ya no existe en la base JSON (ej. tras importar en modo reemplazar)
+        localStorage.removeItem(this.STORAGE_SESSION_KEY);
+        this.currentUser = null;
         return null;
       }
-      this.currentUser = {
-        id: session.userId,
-        name: session.name,
-        email: session.email
-      };
+      this.currentUser = this.sanitizeUser(user);
       return this.currentUser;
     } catch (e) {
       this.currentUser = null;
@@ -527,11 +355,6 @@ class AuthDBService {
   async logout() {
     localStorage.removeItem(this.STORAGE_SESSION_KEY);
     this.currentUser = null;
-    if (this.isFirebaseReady && this.firebaseAuth) {
-      try {
-        await this.firebaseAuth.signOut();
-      } catch (e) {}
-    }
   }
 
   getCurrentUser() {
@@ -551,28 +374,17 @@ class AuthDBService {
   }
 
   // ==========================================
-  // GESTIÓN DE TURNOS (CRUD CON SINCRONIZACIÓN)
+  // GESTIÓN DE TURNOS (CRUD)
   // ==========================================
   getAllShiftsFromStorage() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_SHIFTS_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.error('Error al leer turnos de localStorage:', e);
-      return [];
-    }
-  }
-
-  saveAllShiftsToStorage(shifts) {
-    localStorage.setItem(this.STORAGE_SHIFTS_KEY, JSON.stringify(shifts));
+    return this.db.getCollection('shifts');
   }
 
   getShifts() {
     const user = this.getCurrentUser();
     if (!user) return [];
-    const all = this.getAllShiftsFromStorage();
-    return all
-      .filter(s => s.userId === user.id)
+    return this.db.find('shifts', s => s.userId === user.id)
+      .map(s => ({ ...s, reminders: this.normalizeReminders(s.reminders, s.type) }))
       .sort((a, b) => {
         const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`);
         const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`);
@@ -583,8 +395,8 @@ class AuthDBService {
   getShiftById(shiftId) {
     const user = this.getCurrentUser();
     if (!user) return null;
-    const all = this.getAllShiftsFromStorage();
-    return all.find(s => s.id === shiftId && s.userId === user.id) || null;
+    const s = this.db.findOne('shifts', item => item.id === shiftId && item.userId === user.id);
+    return s ? { ...s, reminders: this.normalizeReminders(s.reminders, s.type) } : null;
   }
 
   getShiftsForDate(dateStr) {
@@ -610,49 +422,52 @@ class AuthDBService {
       shiftData.type = 'M';
     }
 
-    const all = this.getAllShiftsFromStorage();
-    let savedShift = null;
+    const now = new Date().toISOString();
+    const normalizedReminders = this.normalizeReminders(shiftData.reminders, shiftData.type);
+
+    const fields = {
+      date: shiftData.date,
+      startTime: shiftData.startTime,
+      endTime: shiftData.endTime,
+      type: shiftData.type,
+      hospital: (shiftData.hospital || '').trim(),
+      service: (shiftData.service || '').trim(),
+      notes: (shiftData.notes || '').trim(),
+      reminders: normalizedReminders,
+      updatedAt: now
+    };
 
     if (shiftData.id) {
-      const index = all.findIndex(s => s.id === shiftData.id && s.userId === user.id);
-      if (index === -1) {
+      const existing = this.getShiftById(shiftData.id);
+      if (!existing) {
         throw new Error('El turno que intentas modificar no existe o no te pertenece.');
       }
-      all[index] = {
-        ...all[index],
-        date: shiftData.date,
-        startTime: shiftData.startTime,
-        endTime: shiftData.endTime,
-        type: shiftData.type,
-        hospital: (shiftData.hospital || '').trim(),
-        service: (shiftData.service || '').trim(),
-        notes: (shiftData.notes || '').trim(),
-        reminders: shiftData.reminders || { reminder2h: true, reminderTupper: true, reminderRest: true },
-        updatedAt: new Date().toISOString()
-      };
-      savedShift = all[index];
-    } else {
-      savedShift = {
-        id: 'shf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
-        userId: user.id,
-        date: shiftData.date,
-        startTime: shiftData.startTime,
-        endTime: shiftData.endTime,
-        type: shiftData.type,
-        hospital: (shiftData.hospital || '').trim(),
-        service: (shiftData.service || '').trim(),
-        notes: (shiftData.notes || '').trim(),
-        reminders: shiftData.reminders || { reminder2h: true, reminderTupper: true, reminderRest: true },
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      all.push(savedShift);
+      const updated = this.db.update('shifts', shiftData.id, fields);
+      try {
+        if (typeof window !== 'undefined' && window.dispatchEvent) {
+          window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {
+            detail: { action: 'update', before: existing, after: { ...existing, ...fields } }
+          }));
+        }
+      } catch (e) {}
+      return { ...existing, ...fields };
     }
 
-    this.saveAllShiftsToStorage(all);
-    this.syncShiftToFirebase(savedShift);
-
-    return savedShift;
+    const savedShift = {
+      id: 'shf_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
+      userId: user.id,
+      ...fields,
+      createdAt: now
+    };
+    const inserted = this.db.insert('shifts', savedShift);
+    try {
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {
+          detail: { action: 'create', after: savedShift }
+        }));
+      }
+    } catch (e) {}
+    return inserted;
   }
 
   deleteShift(shiftId) {
@@ -660,17 +475,18 @@ class AuthDBService {
     if (!user) {
       throw new Error('Debes iniciar sesión para eliminar turnos.');
     }
-
-    const all = this.getAllShiftsFromStorage();
-    const index = all.findIndex(s => s.id === shiftId && s.userId === user.id);
-    if (index === -1) {
+    const existing = this.getShiftById(shiftId);
+    if (!existing) {
       throw new Error('El turno no existe o no pertenece a tu cuenta.');
     }
-
-    const deleted = all.splice(index, 1)[0];
-    this.saveAllShiftsToStorage(all);
-    this.deleteShiftFromFirebase(shiftId);
-
+    const deleted = this.db.remove('shifts', shiftId);
+    try {
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {
+          detail: { action: 'delete', before: existing }
+        }));
+      }
+    } catch (e) {}
     return deleted;
   }
 
@@ -678,25 +494,14 @@ class AuthDBService {
   // GESTIÓN DE COMPROMISOS PERSONALES (CRUD)
   // ==========================================
   getAllCommitmentsFromStorage() {
-    try {
-      const data = localStorage.getItem(this.STORAGE_COMMITMENTS_KEY);
-      return data ? JSON.parse(data) : [];
-    } catch (e) {
-      console.error('Error al leer compromisos de localStorage:', e);
-      return [];
-    }
-  }
-
-  saveAllCommitmentsToStorage(commitments) {
-    localStorage.setItem(this.STORAGE_COMMITMENTS_KEY, JSON.stringify(commitments));
+    return this.db.getCollection('commitments');
   }
 
   getCommitments() {
     const user = this.getCurrentUser();
     if (!user) return [];
-    const all = this.getAllCommitmentsFromStorage();
-    return all
-      .filter(c => c.userId === user.id)
+    return this.db.find('commitments', c => c.userId === user.id)
+      .map(c => ({ ...c, reminders: this.normalizeReminders(c.reminders, 'commitmentDefault') }))
       .sort((a, b) => {
         const dateA = new Date(`${a.date}T${a.startTime || '00:00'}`);
         const dateB = new Date(`${b.date}T${b.startTime || '00:00'}`);
@@ -707,8 +512,8 @@ class AuthDBService {
   getCommitmentById(id) {
     const user = this.getCurrentUser();
     if (!user) return null;
-    const all = this.getAllCommitmentsFromStorage();
-    return all.find(c => c.id === id && c.userId === user.id) || null;
+    const c = this.db.findOne('commitments', item => item.id === id && item.userId === user.id);
+    return c ? { ...c, reminders: this.normalizeReminders(c.reminders, 'commitmentDefault') } : null;
   }
 
   getCommitmentsForDate(dateStr) {
@@ -734,47 +539,34 @@ class AuthDBService {
       throw new Error('Por favor especifica la hora de inicio y de fin.');
     }
 
-    const all = this.getAllCommitmentsFromStorage();
-    let saved = null;
+    const now = new Date().toISOString();
+    const normalizedReminders = this.normalizeReminders(commitmentData.reminders, 'commitmentDefault');
+    const fields = {
+      title: commitmentData.title.trim(),
+      category: commitmentData.category || 'otro',
+      date: commitmentData.date,
+      startTime: commitmentData.startTime,
+      endTime: commitmentData.endTime,
+      location: commitmentData.location ? commitmentData.location.trim() : '',
+      notes: commitmentData.notes ? commitmentData.notes.trim() : '',
+      reminders: normalizedReminders,
+      updatedAt: now
+    };
 
     if (commitmentData.id) {
-      const idx = all.findIndex(c => c.id === commitmentData.id && c.userId === user.id);
-      if (idx === -1) {
+      if (!this.getCommitmentById(commitmentData.id)) {
         throw new Error('El compromiso que intentas modificar no existe o no te pertenece.');
       }
-      all[idx] = {
-        ...all[idx],
-        title: commitmentData.title.trim(),
-        category: commitmentData.category || 'otro',
-        date: commitmentData.date,
-        startTime: commitmentData.startTime,
-        endTime: commitmentData.endTime,
-        location: commitmentData.location ? commitmentData.location.trim() : '',
-        notes: commitmentData.notes ? commitmentData.notes.trim() : '',
-        updatedAt: new Date().toISOString()
-      };
-      saved = all[idx];
-    } else {
-      saved = {
-        id: 'com_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
-        userId: user.id,
-        title: commitmentData.title.trim(),
-        category: commitmentData.category || 'otro',
-        date: commitmentData.date,
-        startTime: commitmentData.startTime,
-        endTime: commitmentData.endTime,
-        location: commitmentData.location ? commitmentData.location.trim() : '',
-        notes: commitmentData.notes ? commitmentData.notes.trim() : '',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
-      };
-      all.push(saved);
+      return this.db.update('commitments', commitmentData.id, fields);
     }
 
-    this.saveAllCommitmentsToStorage(all);
-    this.syncCommitmentToFirebase(saved);
-
-    return saved;
+    const saved = {
+      id: 'com_' + Date.now() + '_' + Math.random().toString(36).substr(2, 8),
+      userId: user.id,
+      ...fields,
+      createdAt: now
+    };
+    return this.db.insert('commitments', saved);
   }
 
   deleteCommitment(id) {
@@ -782,18 +574,10 @@ class AuthDBService {
     if (!user) {
       throw new Error('Debes iniciar sesión para eliminar compromisos.');
     }
-
-    const all = this.getAllCommitmentsFromStorage();
-    const idx = all.findIndex(c => c.id === id && c.userId === user.id);
-    if (idx === -1) {
+    if (!this.getCommitmentById(id)) {
       throw new Error('El compromiso no existe o no te pertenece.');
     }
-
-    const deleted = all.splice(idx, 1)[0];
-    this.saveAllCommitmentsToStorage(all);
-    this.deleteCommitmentFromFirebase(id);
-
-    return deleted;
+    return this.db.remove('commitments', id);
   }
 
   // ==========================================
@@ -958,7 +742,153 @@ class AuthDBService {
     }
     return null;
   }
+
+  // ==========================================
+  // CONFIGURACIÓN Y GESTIÓN DE RECORDATORIOS (PLAN 03)
+  // ==========================================
+  getDefaultReminderPrefs() {
+    return {
+      notificationsEnabled: true,
+      sound: true,
+      quietHours: { enabled: false, from: '22:00', to: '06:00' },
+      notifyOnChanges: true,
+      templates: {
+        M: [
+          { id: 'tpl_m_1', offsetMinutes: 480, anchor: 'start', label: 'Dormir temprano (8h descanso)', category: 'descanso', enabled: true, firedAt: null },
+          { id: 'tpl_m_2', offsetMinutes: 90, anchor: 'start', label: 'Salir hacia el hospital', category: 'salida', enabled: true, firedAt: null }
+        ],
+        T: [
+          { id: 'tpl_t_1', offsetMinutes: 120, anchor: 'start', label: 'Almorzar y preparar uniforme', category: 'comida', enabled: true, firedAt: null },
+          { id: 'tpl_t_2', offsetMinutes: 60, anchor: 'start', label: 'Salir hacia el hospital', category: 'salida', enabled: true, firedAt: null }
+        ],
+        N: [
+          { id: 'tpl_n_1', offsetMinutes: 360, anchor: 'start', label: 'Siesta reparadora (6h antes)', category: 'descanso', enabled: true, firedAt: null },
+          { id: 'tpl_n_2', offsetMinutes: 120, anchor: 'start', label: 'Cena ligera y café', category: 'comida', enabled: true, firedAt: null }
+        ],
+        G: [
+          { id: 'tpl_g_1', offsetMinutes: 480, anchor: 'start', label: 'Descanso previo a guardia 24h', category: 'descanso', enabled: true, firedAt: null },
+          { id: 'tpl_g_2', offsetMinutes: 120, anchor: 'start', label: 'Revisar víveres y mudas de uniforme', category: 'comida', enabled: true, firedAt: null }
+        ]
+      },
+      commitmentDefault: [
+        { id: 'tpl_com_1', offsetMinutes: 60, anchor: 'start', label: 'Compromiso personal en 1 hora', category: 'personalizado', enabled: true, firedAt: null }
+      ]
+    };
+  }
+
+  getReminderPrefs() {
+    const user = this.getCurrentUser();
+    if (user && this.db) {
+      const fullUser = this.findUserById(user.id);
+      if (fullUser && fullUser.settings && fullUser.settings.reminderPrefs) {
+        return { ...this.getDefaultReminderPrefs(), ...fullUser.settings.reminderPrefs };
+      }
+    }
+    try {
+      const local = (typeof localStorage !== 'undefined' ? localStorage.getItem('antiturno_reminder_prefs_v1') : null);
+      if (local) return { ...this.getDefaultReminderPrefs(), ...JSON.parse(local) };
+    } catch (e) {}
+    return this.getDefaultReminderPrefs();
+  }
+
+  saveReminderPrefs(prefs) {
+    const merged = { ...this.getDefaultReminderPrefs(), ...prefs };
+    const user = this.getCurrentUser();
+    if (user && this.db) {
+      const fullUser = this.findUserById(user.id);
+      if (fullUser) {
+        const settings = fullUser.settings || {};
+        settings.reminderPrefs = merged;
+        this.db.update('users', user.id, { settings, updatedAt: new Date().toISOString() });
+      }
+    }
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem('antiturno_reminder_prefs_v1', JSON.stringify(merged));
+      }
+    } catch (e) {}
+    try {
+      if (typeof window !== 'undefined' && window.dispatchEvent) {
+        window.dispatchEvent(new CustomEvent('antiturno-reminder-prefs-changed', { detail: merged }));
+      }
+    } catch (e) {}
+    return merged;
+  }
+
+  normalizeReminders(reminders, defaultType = 'M') {
+    if (Array.isArray(reminders)) {
+      return reminders.map((r, idx) => ({
+        id: r.id || 'rem_' + Date.now() + '_' + idx,
+        offsetMinutes: Number(r.offsetMinutes ?? 120),
+        anchor: r.anchor === 'end' ? 'end' : 'start',
+        label: (r.label || 'Recordatorio').trim(),
+        category: r.category || 'personalizado',
+        enabled: r.enabled !== false,
+        firedAt: r.firedAt || null
+      }));
+    }
+
+    // Formato legado de 3 booleanos { reminder2h, reminderTupper, reminderRest }
+    if (reminders && typeof reminders === 'object') {
+      const list = [];
+      if (reminders.reminderRest) {
+        list.push({
+          id: 'rem_legacy_rest',
+          offsetMinutes: 480,
+          anchor: 'start',
+          label: 'Descanso 8h previas',
+          category: 'descanso',
+          enabled: true,
+          firedAt: null
+        });
+      }
+      if (reminders.reminderTupper) {
+        list.push({
+          id: 'rem_legacy_tupper',
+          offsetMinutes: 180,
+          anchor: 'start',
+          label: 'Preparar uniforme y comida',
+          category: 'comida',
+          enabled: true,
+          firedAt: null
+        });
+      }
+      if (reminders.reminder2h) {
+        list.push({
+          id: 'rem_legacy_2h',
+          offsetMinutes: 120,
+          anchor: 'start',
+          label: 'Aviso 2h antes de salir',
+          category: 'salida',
+          enabled: true,
+          firedAt: null
+        });
+      }
+      if (list.length > 0) return list;
+    }
+
+    // Plantilla según tipo
+    const prefs = this.getReminderPrefs();
+    if (defaultType === 'commitmentDefault') {
+      return JSON.parse(JSON.stringify(prefs.commitmentDefault || []));
+    }
+    const tpl = (prefs.templates && prefs.templates[defaultType]) || [];
+    return JSON.parse(JSON.stringify(tpl));
+  }
+
+  markReminderFired(collection, itemId, reminderId, firedAt = new Date().toISOString()) {
+    const item = this.db.findOne(collection, x => x.id === itemId);
+    if (!item) return false;
+    const reminders = this.normalizeReminders(item.reminders, item.type || 'commitmentDefault');
+    const target = reminders.find(r => r.id === reminderId);
+    if (!target) return false;
+    target.firedAt = firedAt;
+    this.db.update(collection, itemId, { reminders, updatedAt: new Date().toISOString() });
+    return true;
+  }
+
 }
+
 
 // Instancia global
 window.AuthDB = new AuthDBService();

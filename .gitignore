@@ -34,3 +34,8 @@ Thumbs.db
 
 
 .backup_original/
+
+# Base de datos JSON local (no incluir datos reales con hashes de usuarios)
+data/*.json
+!data/db.schema.example.json
+

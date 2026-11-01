@@ -40,20 +40,31 @@
             "on-tertiary": "#ffffff",
             "tertiary-fixed": "#E8D5C0",
             "on-tertiary-fixed-variant": "#49372B",
-            "background": "#F7EFE5",
-            "on-background": "#49372B",
-            "surface": "#F7EFE5",
-            "on-surface": "#49372B",
+            "background": "#FAF9F6",
+            "on-background": "#292524",
+            "surface": "#FAF9F6",
+            "on-surface": "#292524",
             "surface-container-lowest": "#ffffff",
-            "surface-container-low": "#FAF5EF",
-            "surface-container": "#E8D5C0",
-            "surface-container-high": "#D8C2AA",
-            "on-surface-variant": "#806650",
-            "outline": "#B89B80",
-            "outline-variant": "#E8D5C0",
+            "surface-container-low": "#F5F5F4",
+            "surface-container": "#E7E5E4",
+            "surface-container-high": "#D6D3D1",
+            "on-surface-variant": "#57534E",
+            "outline": "#A8A29E",
+            "outline-variant": "#E7E5E4",
             "error": "#ba1a1a",
             "error-container": "#ffdad6",
-            "on-error": "#ffffff"
+            "on-error": "#ffffff",
+            // Tokens de turnos clínicos (Plan 01)
+            "shift-m": "#F59E0B",
+            "shift-m-soft": "#FEF3C7",
+            "shift-t": "#EA580C",
+            "shift-t-soft": "#FFEDD5",
+            "shift-n": "#4F46E5",
+            "shift-n-soft": "#EEF2FF",
+            "shift-g": "#DC2626",
+            "shift-g-soft": "#FEE2E2",
+            "shift-rest": "#10B981",
+            "shift-rest-soft": "#D1FAE5"
           },
           fontFamily: {
             "headline-lg": ["Plus Jakarta Sans", "sans-serif"],
@@ -75,13 +86,61 @@
       html, body { margin: 0; padding: 0; }
       body { overscroll-behavior: none; }
     }
-    ::-webkit-scrollbar { display: none; }
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
     .app-view { animation: fadeIn 0.18s ease-in-out; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(4px); }
       to { opacity: 1; transform: translateY(0); }
     }
     button, a { -webkit-tap-highlight-color: transparent; }
+
+    /* ========================================== */
+    /* SISTEMA VISUAL DE TURNOS (PLAN 01)         */
+    /* Clases explícitas para compatibilidad CDN   */
+    /* ========================================== */
+    /* Badges & Chips */
+    .shift-badge-m { background-color: #FEF3C7; color: #92400E; border: 1px solid #FCD34D; }
+    .shift-badge-t { background-color: #FFEDD5; color: #9A3412; border: 1px solid #FDBA74; }
+    .shift-badge-n { background-color: #EEF2FF; color: #3730A3; border: 1px solid #A5B4FC; }
+    .shift-badge-g { background-color: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5; }
+    .shift-badge-rest { background-color: #D1FAE5; color: #065F46; border: 1px solid #A7F3D0; }
+
+    /* Bordes de turno en celdas de calendario */
+    .shift-border-m { border-left: 4px solid #F59E0B !important; }
+    .shift-border-t { border-left: 4px solid #EA580C !important; }
+    .shift-border-n { border-left: 4px solid #4F46E5 !important; }
+    .shift-border-g { border-left: 4px solid #DC2626 !important; }
+    .shift-border-rest { border-left: 4px solid #10B981 !important; }
+
+    /* Fondos suaves para celdas del calendario */
+    .shift-bg-m { background-color: #FFFDF5; }
+    .shift-bg-t { background-color: #FFFBF7; }
+    .shift-bg-n { background-color: #F8F9FF; }
+    .shift-bg-g { background-color: #FFF8F8; }
+    .shift-bg-rest { background-color: #F3FCF7; }
+
+    /* Selector de Turnos (Cards de Formulario) */
+    .shift-card-m-selected {
+      background-color: #FEF3C7 !important;
+      border-color: #F59E0B !important;
+      box-shadow: 0 0 0 2px #F59E0B !important;
+    }
+    .shift-card-t-selected {
+      background-color: #FFEDD5 !important;
+      border-color: #EA580C !important;
+      box-shadow: 0 0 0 2px #EA580C !important;
+    }
+    .shift-card-n-selected {
+      background-color: #EEF2FF !important;
+      border-color: #4F46E5 !important;
+      box-shadow: 0 0 0 2px #4F46E5 !important;
+    }
+    .shift-card-g-selected {
+      background-color: #FEE2E2 !important;
+      border-color: #DC2626 !important;
+      box-shadow: 0 0 0 2px #DC2626 !important;
+    }
   </style>
 </head>
 
@@ -183,23 +242,22 @@
                 </div>
               </div>
 
-              <!-- Leyenda de Colores -->
-              <div class="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] font-semibold">
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-primary-fixed text-on-primary-fixed-variant border border-primary-fixed-dim/60">
-                  <span class="w-2 h-2 rounded-full bg-primary"></span> Mañana
-                </span>
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-100 text-amber-900 border border-amber-300">
-                  <span class="w-2 h-2 rounded-full bg-amber-600"></span> Tarde
-                </span>
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-tertiary-fixed text-on-tertiary-fixed-variant border border-tertiary-container/30">
-                  <span class="w-2 h-2 rounded-full bg-tertiary"></span> Noche
-                </span>
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-100 text-red-900 border border-red-300">
-                  <span class="w-2 h-2 rounded-full bg-red-600"></span> Guardia
-                </span>
-                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-300">
-                  <span class="w-2 h-2 rounded-full bg-purple-600"></span> Personal
-                </span>
+              <!-- Leyenda Dinámica de Colores -->
+              <div id="calendarLegendContainer" class="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[11px] font-semibold">
+                <!-- Inyectado dinámicamente desde SHIFT_TYPES -->
+              </div>
+            </div>
+
+            <!-- Barra de Filtros y Resumen Rápido del Mes -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1 pb-2 border-b border-outline-variant/20">
+              <!-- Filtros de Tipo de Turno / Actividad -->
+              <div id="calendarFiltersBar" class="flex flex-wrap items-center gap-1.5 text-xs">
+                <!-- Inyectado dinámicamente con chips: Todos, Mañana, Tarde, Noche, Guardia 24h, Personal -->
+              </div>
+
+              <!-- Mini-Resumen Mensual de Conteo -->
+              <div id="calendarMonthSummaryBar" class="flex flex-wrap items-center gap-2 text-xs">
+                <!-- Inyectado dinámicamente: ej. 6 M · 4 T · 5 N · 1 G · 168h -->
               </div>
             </div>
 
@@ -254,6 +312,22 @@
               <!-- Lista de Próximas Guardias (Inyectada por app.js) -->
               <div id="upcomingShiftsList">
                 <!-- Inyectado por JS -->
+              </div>
+            </div>
+
+            <!-- Tarjeta Próximos Recordatorios (48h) -->
+            <div id="upcomingRemindersCard" class="bg-surface-container-lowest rounded-2xl p-5 sm:p-6 shadow-sm border border-outline-variant/30 flex flex-col gap-3">
+              <div class="flex items-center justify-between pb-2 border-b border-outline-variant/30">
+                <div class="flex items-center gap-2">
+                  <span class="material-symbols-outlined text-primary text-xl">notifications_active</span>
+                  <h3 class="font-headline-md text-base font-bold text-on-surface">Próximos Avisos (48h)</h3>
+                </div>
+                <button onclick="openReminderPrefsModal()" class="p-1 rounded-lg hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="Preferencias de Recordatorios" type="button">
+                  <span class="material-symbols-outlined text-lg leading-none">settings</span>
+                </button>
+              </div>
+              <div id="upcomingRemindersList" class="flex flex-col gap-2">
+                <!-- Inyectado por renderUpcomingReminders() -->
               </div>
             </div>
 
@@ -331,50 +405,58 @@
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               
               <!-- Mañana -->
-              <button type="button" data-shift-type="M" onclick="selectShiftType('M')" class="shift-type-btn text-left p-4 rounded-xl ring-2 ring-primary bg-surface-container-lowest shadow-xs transition-all flex flex-col justify-between h-28 relative border border-outline-variant/30 hover:border-primary">
+              <button type="button" data-shift-type="M" onclick="selectShiftType('M')" class="shift-type-btn text-left p-4 rounded-xl shift-card-m-selected bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-amber-300 hover:border-amber-500 shadow-sm">
                 <div class="flex items-center justify-between">
-                  <span class="w-8 h-8 rounded-lg bg-primary-fixed text-on-primary-fixed-variant flex items-center justify-center font-bold">M</span>
-                  <span class="check-icon material-symbols-outlined text-primary text-xl">check_circle</span>
+                  <span class="w-8 h-8 rounded-lg shift-badge-m flex items-center justify-center font-bold text-sm">
+                    <span class="material-symbols-outlined text-base">wb_sunny</span>
+                  </span>
+                  <span class="check-icon material-symbols-outlined text-amber-700 text-xl">check_circle</span>
                 </div>
                 <div>
-                  <h4 class="font-title-md font-bold text-on-surface">Mañana</h4>
-                  <p class="font-body-sm text-xs text-on-surface-variant">07:00 a 15:00 (8h)</p>
+                  <h4 class="font-title-md font-bold text-amber-950">Mañana</h4>
+                  <p class="font-body-sm text-xs text-amber-900/80">07:00 a 15:00 (8h)</p>
                 </div>
               </button>
 
               <!-- Tarde -->
-              <button type="button" data-shift-type="T" onclick="selectShiftType('T')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-outline-variant/30 hover:border-amber-500">
+              <button type="button" data-shift-type="T" onclick="selectShiftType('T')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-orange-200 hover:border-orange-500">
                 <div class="flex items-center justify-between">
-                  <span class="w-8 h-8 rounded-lg bg-amber-100 text-amber-900 flex items-center justify-center font-bold">T</span>
-                  <span class="check-icon material-symbols-outlined text-secondary/40 text-xl hidden">check_circle</span>
+                  <span class="w-8 h-8 rounded-lg shift-badge-t flex items-center justify-center font-bold text-sm">
+                    <span class="material-symbols-outlined text-base">wb_twilight</span>
+                  </span>
+                  <span class="check-icon material-symbols-outlined text-orange-600 text-xl hidden">check_circle</span>
                 </div>
                 <div>
-                  <h4 class="font-title-md font-bold text-on-surface">Tarde</h4>
-                  <p class="font-body-sm text-xs text-on-surface-variant">15:00 a 23:00 (8h)</p>
+                  <h4 class="font-title-md font-bold text-orange-950">Tarde</h4>
+                  <p class="font-body-sm text-xs text-orange-900/80">15:00 a 23:00 (8h)</p>
                 </div>
               </button>
 
               <!-- Noche -->
-              <button type="button" data-shift-type="N" onclick="selectShiftType('N')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-outline-variant/30 hover:border-tertiary">
+              <button type="button" data-shift-type="N" onclick="selectShiftType('N')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-indigo-200 hover:border-indigo-500">
                 <div class="flex items-center justify-between">
-                  <span class="w-8 h-8 rounded-lg bg-tertiary-fixed text-on-tertiary-fixed-variant flex items-center justify-center font-bold">N</span>
-                  <span class="check-icon material-symbols-outlined text-secondary/40 text-xl hidden">check_circle</span>
+                  <span class="w-8 h-8 rounded-lg shift-badge-n flex items-center justify-center font-bold text-sm">
+                    <span class="material-symbols-outlined text-base">bedtime</span>
+                  </span>
+                  <span class="check-icon material-symbols-outlined text-indigo-600 text-xl hidden">check_circle</span>
                 </div>
                 <div>
-                  <h4 class="font-title-md font-bold text-on-surface">Noche</h4>
-                  <p class="font-body-sm text-xs text-on-surface-variant">23:00 a 07:00 (8h)</p>
+                  <h4 class="font-title-md font-bold text-indigo-950">Noche</h4>
+                  <p class="font-body-sm text-xs text-indigo-900/80">23:00 a 07:00 (8h)</p>
                 </div>
               </button>
 
               <!-- Guardia 24h -->
-              <button type="button" data-shift-type="G" onclick="selectShiftType('G')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-outline-variant/30 hover:border-red-500">
+              <button type="button" data-shift-type="G" onclick="selectShiftType('G')" class="shift-type-btn text-left p-4 rounded-xl bg-surface-container-low transition-all flex flex-col justify-between h-28 relative border border-red-200 hover:border-red-500">
                 <div class="flex items-center justify-between">
-                  <span class="w-8 h-8 rounded-lg bg-red-100 text-red-900 flex items-center justify-center font-bold">G</span>
-                  <span class="check-icon material-symbols-outlined text-secondary/40 text-xl hidden">check_circle</span>
+                  <span class="w-8 h-8 rounded-lg shift-badge-g flex items-center justify-center font-bold text-sm">
+                    <span class="material-symbols-outlined text-base">emergency</span>
+                  </span>
+                  <span class="check-icon material-symbols-outlined text-red-600 text-xl hidden">check_circle</span>
                 </div>
                 <div>
-                  <h4 class="font-title-md font-bold text-on-surface">Guardia 24h</h4>
-                  <p class="font-body-sm text-xs text-on-surface-variant">08:00 a 08:00 (24h)</p>
+                  <h4 class="font-title-md font-bold text-red-950">Guardia 24h</h4>
+                  <p class="font-body-sm text-xs text-red-900/80">08:00 a 08:00 (24h)</p>
                 </div>
               </button>
 
@@ -415,26 +497,46 @@
             <textarea id="shiftNotesInput" rows="3" placeholder="Ej: Relevo asignado con Carlos Mendoza; Cama 104 noradrenalina; Supervisión de estudiante de enfermería." class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl p-4 text-on-surface font-body-md outline-none focus:ring-2 focus:ring-primary resize-none transition-all"></textarea>
           </div>
 
-          <!-- 6. Recordatorios y Avisos Previos -->
-          <div class="flex flex-col gap-3 pt-2 border-t border-outline-variant/30">
-            <label class="font-title-md text-xs font-bold text-on-surface uppercase tracking-wider text-on-surface-variant">Configuración de Recordatorios</label>
-            
-            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <label class="flex items-center gap-2.5 p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 cursor-pointer">
-                <input type="checkbox" id="remind2hCheckbox" checked class="w-4 h-4 accent-primary rounded cursor-pointer"/>
-                <span class="text-xs font-medium text-on-surface">Aviso 2h antes de salir</span>
-              </label>
-
-              <label class="flex items-center gap-2.5 p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 cursor-pointer">
-                <input type="checkbox" id="remindTupperCheckbox" checked class="w-4 h-4 accent-primary rounded cursor-pointer"/>
-                <span class="text-xs font-medium text-on-surface">Uniforme y comida</span>
-              </label>
-
-              <label class="flex items-center gap-2.5 p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 cursor-pointer">
-                <input type="checkbox" id="remindRestCheckbox" checked class="w-4 h-4 accent-primary rounded cursor-pointer"/>
-                <span class="text-xs font-medium text-on-surface">Descanso 8h previas</span>
-              </label>
+          <!-- 6. Recordatorios y Avisos Personalizados -->
+          <div class="flex flex-col gap-3 pt-4 border-t border-outline-variant/30">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <label class="font-title-md text-xs font-bold text-on-surface uppercase tracking-wider text-on-surface-variant flex items-center gap-1.5">
+                  <span class="material-symbols-outlined text-base text-primary">notifications_active</span>
+                  <span>Configuración de Recordatorios y Alarmas</span>
+                </label>
+                <p class="text-[11px] text-on-surface-variant mt-0.5">Avisos ilimitados para trayecto, uniforme, comida y descanso.</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="applyShiftTemplateReminders()" class="text-xs px-2.5 py-1 rounded-lg bg-surface-container hover:bg-surface-container-high text-on-surface font-semibold flex items-center gap-1 transition-colors" title="Restaurar recordatorios por defecto de este tipo de turno">
+                  <span class="material-symbols-outlined text-sm">autorenew</span>
+                  <span>Plantilla</span>
+                </button>
+                <button type="button" onclick="openReminderPrefsModal()" class="text-xs p-1.5 rounded-lg hover:bg-surface-container text-on-surface-variant hover:text-on-surface transition-colors" title="Preferencias generales de recordatorios">
+                  <span class="material-symbols-outlined text-base">settings</span>
+                </button>
+              </div>
             </div>
+
+            <!-- Chips de agregado rápido -->
+            <div class="flex flex-wrap items-center gap-1.5 pt-1">
+              <span class="text-[11px] font-semibold text-on-surface-variant mr-1">Rápido:</span>
+              <button type="button" onclick="addQuickReminder(15, 'start', 'Aviso 15 min antes', 'salida')" class="px-2.5 py-1 rounded-full bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface transition-colors">+ 15 min</button>
+              <button type="button" onclick="addQuickReminder(60, 'start', 'Aviso 1 hora antes', 'salida')" class="px-2.5 py-1 rounded-full bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface transition-colors">+ 1 hora</button>
+              <button type="button" onclick="addQuickReminder(120, 'start', 'Aviso 2 horas antes', 'comida')" class="px-2.5 py-1 rounded-full bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface transition-colors">+ 2 horas</button>
+              <button type="button" onclick="addQuickReminder(480, 'start', 'Descanso 8 horas previas', 'descanso')" class="px-2.5 py-1 rounded-full bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface transition-colors">+ 8 horas</button>
+              <button type="button" onclick="addQuickReminder(1440, 'start', 'Aviso 1 día antes', 'personalizado')" class="px-2.5 py-1 rounded-full bg-surface-container-low hover:bg-surface-container border border-outline-variant/40 text-[11px] font-medium text-on-surface transition-colors">+ 1 día</button>
+            </div>
+
+            <!-- Lista interactiva de recordatorios del turno -->
+            <div id="shiftRemindersList" class="flex flex-col gap-2.5 mt-1">
+              <!-- Renderizado dinámico por renderShiftRemindersEditor() -->
+            </div>
+
+            <button type="button" onclick="addNewCustomReminder('shift')" class="self-start mt-1 px-3 py-1.5 rounded-xl border border-dashed border-primary/40 hover:border-primary text-primary hover:bg-primary/5 text-xs font-semibold flex items-center gap-1.5 transition-colors">
+              <span class="material-symbols-outlined text-sm">add_circle</span>
+              <span>Añadir Recordatorio Personalizado</span>
+            </button>
           </div>
 
           <!-- Barra de Acciones del Formulario -->
@@ -776,6 +878,26 @@
           <textarea id="comNotesInput" rows="2" placeholder="Recordar llevar informes previos, preparativos..." class="bg-surface-container-low border border-outline-variant/40 rounded-xl p-3 text-on-surface text-xs outline-none focus:ring-2 focus:ring-tertiary resize-none"></textarea>
         </div>
 
+        <!-- Recordatorios del compromiso -->
+        <div class="flex flex-col gap-2 pt-2 border-t border-outline-variant/30">
+          <div class="flex items-center justify-between">
+            <label class="font-title-md text-xs font-bold text-on-surface uppercase tracking-wider text-on-surface-variant flex items-center gap-1">
+              <span class="material-symbols-outlined text-sm text-primary">notifications</span>
+              <span>Recordatorios</span>
+            </label>
+            <button type="button" onclick="addQuickReminderCommitment(60, '1h antes')" class="text-[11px] text-primary hover:underline font-semibold">
+              + 1h antes
+            </button>
+          </div>
+          <div id="commitmentRemindersList" class="flex flex-col gap-2">
+            <!-- Renderizado dinámico -->
+          </div>
+          <button type="button" onclick="addNewCustomReminder('commitment')" class="self-start text-[11px] px-2.5 py-1 rounded-lg border border-dashed border-primary/40 text-primary hover:bg-primary/5 font-semibold flex items-center gap-1">
+            <span class="material-symbols-outlined text-xs">add</span>
+            <span>Añadir recordatorio</span>
+          </button>
+        </div>
+
         <div class="p-3 rounded-xl bg-surface-container-low flex items-center gap-2 text-primary text-xs">
           <span class="material-symbols-outlined text-base">verified_user</span>
           <span>Protección anti-cruces activada: verificaremos turnos clínicos y periodos de sueño.</span>
@@ -888,27 +1010,44 @@
       </div>
 
       <div class="p-6">
-        <form id="authLoginForm" onsubmit="handleLoginSubmit(event)" class="flex flex-col gap-4">
+        <form id="authLoginForm" name="login" method="post" action="#" autocomplete="on" onsubmit="handleLoginSubmit(event)" class="flex flex-col gap-4">
           <div id="authLoginError" class="hidden p-3 rounded-xl bg-error-container text-error text-xs font-semibold"></div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Correo Electrónico</label>
-            <input type="email" id="loginEmailInput" required placeholder="tu-correo@hospital.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="loginEmailInput" class="font-title-md text-xs font-bold text-on-surface">Correo Electrónico</label>
+            <input type="email" id="loginEmailInput" name="email" autocomplete="username email" inputmode="email" autocapitalize="off" spellcheck="false" required placeholder="tu-correo@hospital.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Contraseña</label>
-            <input type="password" id="loginPasswordInput" required placeholder="••••••••" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="loginPasswordInput" class="font-title-md text-xs font-bold text-on-surface">Contraseña</label>
+            <div class="relative flex items-center">
+              <input type="password" id="loginPasswordInput" name="password" autocomplete="current-password" required placeholder="••••••••" class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl pl-4 pr-11 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+              <button type="button" onclick="togglePasswordVisibility('loginPasswordInput', 'loginPassToggleBtn')" id="loginPassToggleBtn" class="absolute right-2 text-on-surface-variant hover:text-on-surface p-1.5 rounded-lg hover:bg-surface-container transition-colors" title="Mostrar u ocultar contraseña" aria-label="Mostrar u ocultar contraseña">
+                <span class="material-symbols-outlined text-lg leading-none">visibility</span>
+              </button>
+            </div>
           </div>
 
-          <div class="flex items-center justify-between text-xs">
-            <label class="flex items-center gap-2 text-on-surface-variant cursor-pointer">
-              <input type="checkbox" id="loginRememberCheckbox" checked class="w-4 h-4 accent-primary rounded"/>
-              <span>Recordar mi sesión</span>
-            </label>
-            <button type="button" onclick="switchAuthTab('register')" class="text-primary hover:underline font-semibold">
-              ¿No tienes cuenta?
-            </button>
+          <div class="flex flex-col gap-2 pt-1 text-xs text-on-surface-variant">
+            <div class="flex items-center justify-between">
+              <label for="loginRememberEmailCheckbox" class="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" id="loginRememberEmailCheckbox" name="rememberEmail" checked class="w-4 h-4 accent-primary rounded"/>
+                <span>Recordar mi correo</span>
+              </label>
+              <label for="loginRememberCheckbox" class="flex items-center gap-2 cursor-pointer select-none">
+                <input type="checkbox" id="loginRememberCheckbox" name="rememberMe" checked class="w-4 h-4 accent-primary rounded"/>
+                <span>Recordar mi sesión</span>
+              </label>
+            </div>
+            <div class="flex items-center justify-between pt-1 border-t border-outline-variant/20">
+              <button type="button" onclick="closeAuthModal(); openDataModal('import');" class="text-[11px] text-primary hover:underline font-medium flex items-center gap-1">
+                <span class="material-symbols-outlined text-[13px]">file_upload</span>
+                <span>¿Tienes copia de seguridad? Importar .json</span>
+              </button>
+              <button type="button" onclick="switchAuthTab('register')" class="text-primary hover:underline font-semibold text-xs">
+                ¿No tienes cuenta?
+              </button>
+            </div>
           </div>
 
           <button type="submit" id="loginSubmitBtn" class="mt-2 w-full py-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer">
@@ -916,39 +1055,55 @@
           </button>
         </form>
 
-        <form id="authRegisterForm" onsubmit="handleRegisterSubmit(event)" class="flex flex-col gap-4 hidden">
+        <form id="authRegisterForm" name="register" method="post" action="#" autocomplete="on" onsubmit="handleRegisterSubmit(event)" class="flex flex-col gap-4 hidden">
           <div id="authRegisterError" class="hidden p-3 rounded-xl bg-error-container text-error text-xs font-semibold"></div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Nombre Completo</label>
-            <input type="text" id="regNameInput" required placeholder="Ej: Karol Gallo" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="regNameInput" class="font-title-md text-xs font-bold text-on-surface">Nombre Completo</label>
+            <input type="text" id="regNameInput" name="name" autocomplete="name" required placeholder="Ej: Karol Gallo" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Correo Electrónico</label>
-            <input type="email" id="regEmailInput" required placeholder="tu-correo@hospital.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="regEmailInput" class="font-title-md text-xs font-bold text-on-surface">Correo Electrónico</label>
+            <input type="email" id="regEmailInput" name="email" autocomplete="username email" inputmode="email" autocapitalize="off" spellcheck="false" required placeholder="tu-correo@hospital.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Contraseña</label>
-            <input type="password" id="regPasswordInput" required minlength="6" placeholder="Mínimo 6 caracteres" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="regPasswordInput" class="font-title-md text-xs font-bold text-on-surface">Contraseña</label>
+            <div class="relative flex items-center">
+              <input type="password" id="regPasswordInput" name="password" autocomplete="new-password" required minlength="6" placeholder="Mínimo 6 caracteres" class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl pl-4 pr-11 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+              <button type="button" onclick="togglePasswordVisibility('regPasswordInput', 'regPassToggleBtn')" id="regPassToggleBtn" class="absolute right-2 text-on-surface-variant hover:text-on-surface p-1.5 rounded-lg hover:bg-surface-container transition-colors" title="Mostrar u ocultar contraseña" aria-label="Mostrar u ocultar contraseña">
+                <span class="material-symbols-outlined text-lg leading-none">visibility</span>
+              </button>
+            </div>
           </div>
 
           <div class="flex flex-col gap-1.5">
-            <label class="font-title-md text-xs font-bold text-on-surface">Confirmar Contraseña</label>
-            <input type="password" id="regConfirmPasswordInput" required minlength="6" placeholder="Repite tu contraseña" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-4 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+            <label for="regConfirmPasswordInput" class="font-title-md text-xs font-bold text-on-surface">Confirmar Contraseña</label>
+            <div class="relative flex items-center">
+              <input type="password" id="regConfirmPasswordInput" name="confirmPassword" autocomplete="new-password" required minlength="6" placeholder="Repite tu contraseña" class="w-full bg-surface-container-low border border-outline-variant/40 rounded-xl pl-4 pr-11 py-3 text-on-surface text-sm outline-none focus:ring-2 focus:ring-primary"/>
+              <button type="button" onclick="togglePasswordVisibility('regConfirmPasswordInput', 'regConfirmPassToggleBtn')" id="regConfirmPassToggleBtn" class="absolute right-2 text-on-surface-variant hover:text-on-surface p-1.5 rounded-lg hover:bg-surface-container transition-colors" title="Mostrar u ocultar contraseña" aria-label="Mostrar u ocultar contraseña">
+                <span class="material-symbols-outlined text-lg leading-none">visibility</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 pt-1 text-xs text-on-surface-variant">
+            <label for="regRememberEmailCheckbox" class="flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" id="regRememberEmailCheckbox" name="rememberEmail" checked class="w-4 h-4 accent-primary rounded"/>
+              <span>Recordar mi correo en este equipo para futuros inicios de sesión</span>
+            </label>
           </div>
 
           <p class="text-[11px] text-on-surface-variant flex items-center gap-1">
             <span class="material-symbols-outlined text-sm text-primary">verified_user</span>
-            <span>Tus credenciales se cifran con PBKDF2 (100.000 iteraciones). Tu contraseña nunca se guarda en texto plano.</span>
+            <span>Tus credenciales se cifran con PBKDF2 (100.000 iteraciones + Salt). Tu base de datos es 100% local en formato JSON.</span>
           </p>
 
           <button type="submit" id="regSubmitBtn" class="mt-2 w-full py-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer">
             <span>Crear Mi Cuenta</span>
           </button>
         </form>
-
       </div>
     </div>
   </div>
@@ -956,6 +1111,102 @@
   <!-- ========================================== -->
   <!-- MODAL: DETALLE DEL DÍA                     -->
   <!-- ========================================== -->
+  <!-- ========================================== -->
+  <!-- MODAL: PREFERENCIAS DE RECORDATORIOS       -->
+  <!-- ========================================== -->
+  <div id="reminderPrefsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/50 backdrop-blur-sm p-4 hidden animate-in fade-in">
+    <div class="bg-surface-container-lowest max-w-lg w-full rounded-2xl shadow-2xl border border-outline-variant/40 p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-outline-variant/30">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+            <span class="material-symbols-outlined text-2xl">tune</span>
+          </div>
+          <div>
+            <h3 class="font-headline-md text-base sm:text-lg font-bold text-on-surface">Preferencias de Recordatorios</h3>
+            <p class="text-xs text-on-surface-variant">Personaliza notificaciones, sonidos y plantillas por turno</p>
+          </div>
+        </div>
+        <button onclick="closeReminderPrefsModal()" class="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant hover:text-on-surface" type="button" aria-label="Cerrar modal">
+          <span class="material-symbols-outlined">close</span>
+        </button>
+      </div>
+
+      <!-- Estado del permiso de notificación -->
+      <div id="notifPermissionBox" class="p-4 rounded-xl bg-surface-container-low border border-outline-variant/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <!-- Inyectado dinámicamente -->
+      </div>
+
+      <!-- Toggles principales -->
+      <div class="flex flex-col gap-3">
+        <!-- Sonido -->
+        <label class="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 cursor-pointer select-none">
+          <div class="flex items-center gap-2.5">
+            <span class="material-symbols-outlined text-primary text-xl">volume_up</span>
+            <div>
+              <span class="text-xs font-bold text-on-surface block">Sonido de aviso suave</span>
+              <span class="text-[11px] text-on-surface-variant">Melodía breve generada con Web Audio API</span>
+            </div>
+          </div>
+          <input type="checkbox" id="prefSoundCheckbox" checked class="w-5 h-5 accent-primary rounded cursor-pointer"/>
+        </label>
+
+        <!-- Avisar cambios en turnos -->
+        <label class="flex items-center justify-between p-3 rounded-xl bg-surface-container-low border border-outline-variant/30 cursor-pointer select-none">
+          <div class="flex items-center gap-2.5">
+            <span class="material-symbols-outlined text-primary text-xl">edit_calendar</span>
+            <div>
+              <span class="text-xs font-bold text-on-surface block">Avisar cambios de horario</span>
+              <span class="text-[11px] text-on-surface-variant">Notificar al crear, editar o cancelar un turno</span>
+            </div>
+          </div>
+          <input type="checkbox" id="prefNotifyChangesCheckbox" checked class="w-5 h-5 accent-primary rounded cursor-pointer"/>
+        </label>
+      </div>
+
+      <!-- Horas de Silencio -->
+      <div class="p-4 rounded-xl border border-outline-variant/40 bg-surface-container-low flex flex-col gap-3">
+        <label class="flex items-center justify-between cursor-pointer select-none">
+          <div class="flex items-center gap-2">
+            <span class="material-symbols-outlined text-primary text-xl">bedtime</span>
+            <div>
+              <span class="text-xs font-bold text-on-surface block">Horas de silencio</span>
+              <span class="text-[11px] text-on-surface-variant">Suprime sonidos y notificaciones intrusivas</span>
+            </div>
+          </div>
+          <input type="checkbox" id="prefQuietEnabledCheckbox" class="w-5 h-5 accent-primary rounded cursor-pointer"/>
+        </label>
+
+        <div id="quietHoursRangeContainer" class="grid grid-cols-2 gap-3 pt-2 border-t border-outline-variant/30">
+          <div class="flex flex-col gap-1">
+            <span class="text-[11px] font-semibold text-on-surface-variant">Desde:</span>
+            <input type="time" id="prefQuietFromInput" value="22:00" class="bg-surface-container-lowest border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface outline-none focus:ring-2 focus:ring-primary"/>
+          </div>
+          <div class="flex flex-col gap-1">
+            <span class="text-[11px] font-semibold text-on-surface-variant">Hasta:</span>
+            <input type="time" id="prefQuietToInput" value="06:00" class="bg-surface-container-lowest border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-semibold text-on-surface outline-none focus:ring-2 focus:ring-primary"/>
+          </div>
+        </div>
+      </div>
+
+      <!-- Botón de prueba y acciones -->
+      <div class="flex items-center justify-between pt-2 border-t border-outline-variant/30">
+        <button type="button" onclick="testReminderAlert()" class="px-3 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-primary font-bold text-xs flex items-center gap-1.5 transition-colors">
+          <span class="material-symbols-outlined text-base">play_arrow</span>
+          <span>Probar Sonido y Aviso</span>
+        </button>
+
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeReminderPrefsModal()" class="px-4 py-2 rounded-xl bg-surface-container text-on-surface text-xs font-semibold">
+            Cancelar
+          </button>
+          <button type="button" onclick="saveReminderPrefsFromUI()" class="px-5 py-2 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-bold shadow-xs">
+            Guardar
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="dayDetailsModal" class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/50 backdrop-blur-sm p-4 hidden animate-in fade-in">
     <div class="bg-surface-container-lowest max-w-lg w-full rounded-2xl shadow-2xl border border-outline-variant/40 overflow-hidden flex flex-col">
       <div class="p-5 bg-surface-container-low border-b border-outline-variant/30 flex items-center justify-between">
@@ -975,54 +1226,85 @@
   </div>
 
   <!-- ========================================== -->
-  <!-- MODAL: CONFIGURACIÓN EN LA NUBE (FIREBASE) -->
+  <!-- MODAL: MIS DATOS (BASE DE DATOS JSON)      -->
   <!-- ========================================== -->
-  <div id="cloudConfigModal" class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/50 backdrop-blur-sm p-4 hidden animate-in fade-in">
-    <div class="bg-surface-container-lowest max-w-md w-full rounded-2xl shadow-2xl border border-outline-variant/40 p-6 flex flex-col gap-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="material-symbols-outlined text-primary text-2xl">cloud_sync</span>
-          <h3 class="font-headline-md text-lg font-bold text-on-surface">Sincronización en la Nube</h3>
+  <div id="dataModal" class="fixed inset-0 z-50 flex items-center justify-center bg-inverse-surface/50 backdrop-blur-sm p-4 hidden animate-in fade-in">
+    <div class="bg-surface-container-lowest max-w-xl w-full rounded-2xl shadow-2xl border border-outline-variant/40 p-6 flex flex-col gap-5 max-h-[90vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-outline-variant/30">
+        <div class="flex items-center gap-2.5">
+          <div class="w-10 h-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+            <span class="material-symbols-outlined text-2xl">database</span>
+          </div>
+          <div>
+            <h3 class="font-headline-md text-base sm:text-lg font-bold text-on-surface">Mis Datos · Base de Datos JSON</h3>
+            <p class="text-xs text-on-surface-variant">Gestión local privada, copias de seguridad y sincronización</p>
+          </div>
         </div>
-        <button onclick="closeCloudConfigModal()" class="p-1 rounded-full hover:bg-surface-container text-on-surface-variant">
+        <button onclick="closeDataModal()" class="p-1.5 rounded-full hover:bg-surface-container text-on-surface-variant hover:text-on-surface" type="button" aria-label="Cerrar modal">
           <span class="material-symbols-outlined">close</span>
         </button>
       </div>
 
-      <p class="text-xs text-on-surface-variant leading-relaxed">
-        AntiTurno almacena tus turnos y compromisos de forma 100% segura y privada en este equipo. Si deseas sincronizarlos automáticamente entre tu celular y tu computador en tiempo real, puedes ingresar tus credenciales de un proyecto gratuito de <strong>Firebase</strong>.
-      </p>
+      <!-- Resumen / Estadísticas -->
+      <div id="dataModalStats" class="grid grid-cols-3 gap-2 p-3 rounded-xl bg-surface-container-low border border-outline-variant/40 text-center">
+        <!-- Inyectado por renderDataModalStatus() -->
+      </div>
 
-      <form onsubmit="saveCloudConfig(event)" class="flex flex-col gap-3">
-        <div class="flex flex-col gap-1">
-          <label class="text-xs font-bold text-on-surface">API Key de Firebase</label>
-          <input type="text" id="fbApiKey" placeholder="AIzaSy..." class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
+      <!-- Sección 1: Exportar Copia de Seguridad -->
+      <div class="flex flex-col gap-2 p-4 rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
+        <div class="flex items-center gap-2 text-primary font-bold text-sm">
+          <span class="material-symbols-outlined text-lg">download</span>
+          <span>Exportar Copia de Seguridad (.json)</span>
         </div>
-
-        <div class="flex flex-col gap-1">
-          <label class="text-xs font-bold text-on-surface">Project ID</label>
-          <input type="text" id="fbProjectId" placeholder="mi-proyecto-12345" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label class="text-xs font-bold text-on-surface">Auth Domain</label>
-          <input type="text" id="fbAuthDomain" placeholder="mi-proyecto-12345.firebaseapp.com" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
-        </div>
-
-        <div class="flex flex-col gap-1">
-          <label class="text-xs font-bold text-on-surface">App ID (opcional)</label>
-          <input type="text" id="fbAppId" placeholder="1:123456789:web:abcdef..." class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-3 py-2 text-xs font-mono outline-none focus:ring-2 focus:ring-primary"/>
-        </div>
-
-        <div class="flex items-center justify-end gap-2 pt-2 border-t border-outline-variant/30">
-          <button type="button" onclick="closeCloudConfigModal()" class="px-4 py-2 rounded-xl bg-surface-container text-on-surface text-xs font-semibold">
-            Cancelar
+        <p class="text-xs text-on-surface-variant leading-relaxed">
+          Descarga un archivo con tus turnos, compromisos y cuenta. Sirve de respaldo o para pasarlos a tu celular u otro computador sin depender de la nube.
+        </p>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <button type="button" onclick="handleExportDB('user')" class="flex-1 min-w-[160px] py-2 px-3 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-bold shadow-xs transition-all flex items-center justify-center gap-1.5">
+            <span class="material-symbols-outlined text-base">person</span>
+            <span>Descargar Mis Turnos (.json)</span>
           </button>
-          <button type="submit" class="px-5 py-2 rounded-xl bg-primary text-on-primary text-xs font-bold shadow-xs">
-            Guardar Configuración
+          <button type="button" onclick="handleExportDB('all')" class="py-2 px-3 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold transition-all flex items-center justify-center gap-1.5">
+            <span class="material-symbols-outlined text-base">folder_zip</span>
+            <span>Toda la Base</span>
           </button>
         </div>
-      </form>
+      </div>
+
+      <!-- Sección 2: Importar / Restaurar -->
+      <div class="flex flex-col gap-2.5 p-4 rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
+        <div class="flex items-center gap-2 text-primary font-bold text-sm">
+          <span class="material-symbols-outlined text-lg">upload</span>
+          <span>Importar Copia de Seguridad</span>
+        </div>
+        <p class="text-xs text-on-surface-variant leading-relaxed">
+          Carga un archivo <code>antiturno-db-*.json</code> para restaurar tus datos o sincronizar cambios hechos en otro dispositivo.
+        </p>
+        <div class="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
+          <input type="file" id="dbImportFileInput" accept=".json,application/json" class="flex-1 text-xs text-on-surface-variant file:mr-2 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-surface-container file:text-on-surface hover:file:bg-surface-container-high cursor-pointer"/>
+          <select id="dbImportModeSelect" class="bg-surface-container-low border border-outline-variant/40 rounded-xl px-2.5 py-1.5 text-xs text-on-surface outline-none">
+            <option value="merge" selected>Combinar (conserva los más nuevos)</option>
+            <option value="replace">Reemplazar base completa</option>
+          </select>
+        </div>
+        <div class="flex justify-end pt-1">
+          <button type="button" onclick="handleImportDB()" class="py-2 px-4 rounded-xl bg-primary hover:bg-primary-container text-on-primary text-xs font-bold shadow-xs transition-all flex items-center gap-1.5 cursor-pointer">
+            <span class="material-symbols-outlined text-base">publish</span>
+            <span>Procesar e Importar</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Sección 3: Vinculación con archivo local en PC (File System Access API) -->
+      <div id="dbFileLinkSection" class="flex flex-col gap-2 p-4 rounded-xl border border-outline-variant/40 bg-surface-container-lowest">
+        <!-- Inyectado dinámicamente por renderDataModalStatus() -->
+      </div>
+
+      <div class="flex items-center justify-end pt-2 border-t border-outline-variant/30">
+        <button type="button" onclick="closeDataModal()" class="px-5 py-2 rounded-xl bg-surface-container hover:bg-surface-container-high text-on-surface text-xs font-semibold">
+          Cerrar
+        </button>
+      </div>
     </div>
   </div>
 
@@ -1064,14 +1346,10 @@
     </div>
   </footer>
 
-    <!-- Firebase Compat SDK (Auth & Firestore) -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-  
-  <!-- Scripts de la Aplicación -->
-  <script src="js/firebase-config.js"></script>
+    <!-- Scripts de la Aplicación (Base de datos JSON local + Criptografía PBKDF2) -->
+  <script src="js/json-db.js"></script>
   <script src="js/auth-db.js"></script>
+  <script src="js/reminders.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>

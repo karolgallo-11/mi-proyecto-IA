@@ -1,0 +1,70 @@
+{
+  "app": "AntiTurno",
+  "version": 2,
+  "updatedAt": "2026-11-01T08:00:00.000Z",
+  "users": [
+    {
+      "id": "usr_example_karol",
+      "name": "Karol Gallo",
+      "email": "karol@hospital.com",
+      "salt": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+      "hash": "pbkdf2_subtle_sha256_mock_hash_for_documentation_purposes",
+      "createdAt": "2026-10-15T12:00:00.000Z",
+      "updatedAt": "2026-10-15T12:00:00.000Z",
+      "settings": {
+        "rememberEmail": true,
+        "reminderPrefs": {
+          "anticipationHours": 2,
+          "alertType": "standard"
+        }
+      }
+    }
+  ],
+  "shifts": [
+    {
+      "id": "shf_example_01",
+      "userId": "usr_example_karol",
+      "date": "2026-11-03",
+      "startTime": "07:00",
+      "endTime": "15:00",
+      "type": "M",
+      "hospital": "Hospital Central Universitario",
+      "service": "Urgencias Pediatría",
+      "notes": "Entrega de guardia con enfermero jefe",
+      "reminders": [],
+      "createdAt": "2026-10-20T10:00:00.000Z",
+      "updatedAt": "2026-10-20T10:00:00.000Z"
+    },
+    {
+      "id": "shf_example_02",
+      "userId": "usr_example_karol",
+      "date": "2026-11-04",
+      "startTime": "19:00",
+      "endTime": "07:00",
+      "type": "N",
+      "hospital": "Hospital Central Universitario",
+      "service": "UCI Coronaria",
+      "notes": "Guardia nocturna",
+      "reminders": [],
+      "createdAt": "2026-10-20T10:05:00.000Z",
+      "updatedAt": "2026-10-20T10:05:00.000Z"
+    }
+  ],
+  "commitments": [
+    {
+      "id": "com_example_01",
+      "userId": "usr_example_karol",
+      "title": "Clase de Yoga y Estiramiento",
+      "category": "ejercicio",
+      "date": "2026-11-02",
+      "startTime": "17:00",
+      "endTime": "18:30",
+      "location": "Centro Bienestar",
+      "notes": "Llevar esterilla propia",
+      "reminders": [],
+      "createdAt": "2026-10-22T14:00:00.000Z",
+      "updatedAt": "2026-10-22T14:00:00.000Z"
+    }
+  ]
+}
+
