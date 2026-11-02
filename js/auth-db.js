@@ -18,13 +18,22 @@ class AuthDBService {
     this.LEGACY_SESSION_KEY = 'cuidadosync_session_v1';
 
     this.currentUser = null;
+    this.isFirebaseReady = false;
+    this.firestore = null;
+    this.unsubscribeShifts = null;
+    this.unsubscribeCommitments = null;
 
     this.init();
   }
 
   init() {
+    this.initFirebase();
     this.migrateLegacySession();
     this.checkSession();
+    if (this.currentUser && this.isFirebaseReady) {
+      this.pullUserDataFromFirebase(this.currentUser.id);
+      this.setupRealtimeSync(this.currentUser.id);
+    }
   }
 
   /** Conserva la sesión iniciada con la versión anterior (si el usuario existe en la base JSON). */
@@ -45,8 +54,223 @@ class AuthDBService {
     }
   }
 
+  // ==========================================
+  // INICIALIZACIÓN Y SINCRONIZACIÓN FIREBASE CLOUD
+  // ==========================================
+  initFirebase() {
+    try {
+      const cfg = (typeof window !== 'undefined' && window.FIREBASE_CONFIG) ? window.FIREBASE_CONFIG : null;
+      if (cfg && cfg.apiKey && cfg.projectId && typeof window !== 'undefined' && window.firebase && window.firebase.initializeApp) {
+        if (!firebase.apps || !firebase.apps.length) {
+          firebase.initializeApp(cfg);
+        }
+        this.firestore = firebase.firestore();
+        this.isFirebaseReady = true;
+        console.log('☁️ AntiTurno: Conectado a Firebase Cloud Firestore');
+      } else {
+        this.isFirebaseReady = false;
+      }
+    } catch (e) {
+      console.warn('⚠️ AntiTurno: Firebase no disponible (operando en modo local seguro):', e);
+      this.isFirebaseReady = false;
+    }
+  }
+
   getAuthMode() {
-    return 'local-json';
+    return this.isFirebaseReady ? 'cloud-firebase' : 'local-json';
+  }
+
+  async syncUserToFirebase(user) {
+    if (!this.isFirebaseReady || !this.firestore || !user) return;
+    try {
+      const safeDoc = {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        salt: user.salt,
+        hash: user.hash,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt || user.createdAt
+      };
+      await this.firestore.collection('users').doc(user.email).set(safeDoc, { merge: true });
+    } catch (e) {
+      console.warn('Error sincronizando usuario a Firebase:', e);
+    }
+  }
+
+  async pullUserDataFromFirebase(userId) {
+    if (!this.isFirebaseReady || !this.firestore || !userId) return;
+    try {
+      // 1. Descargar turnos del usuario
+      const shiftsSnap = await this.firestore.collection('users').doc(userId).collection('shifts').get();
+      const remoteShifts = [];
+      shiftsSnap.forEach(doc => {
+        const data = doc.data();
+        if (data && data.id) remoteShifts.push(data);
+      });
+
+      if (remoteShifts.length > 0) {
+        const otherShifts = this.getAllShiftsFromStorage().filter(s => s.userId !== userId);
+        const mergedShifts = [...otherShifts];
+        remoteShifts.forEach(rs => {
+          const idx = mergedShifts.findIndex(s => s.id === rs.id);
+          if (idx >= 0) mergedShifts[idx] = rs;
+          else mergedShifts.push(rs);
+        });
+        this.db.doc.shifts = mergedShifts;
+        this.db.save();
+      } else {
+        const localShifts = this.getShifts();
+        for (const s of localShifts) {
+          await this.syncShiftToFirebase(s);
+        }
+      }
+
+      // 2. Descargar compromisos personales del usuario
+      const comSnap = await this.firestore.collection('users').doc(userId).collection('commitments').get();
+      const remoteComs = [];
+      comSnap.forEach(doc => {
+        const data = doc.data();
+        if (data && data.id) remoteComs.push(data);
+      });
+
+      if (remoteComs.length > 0) {
+        const otherComs = this.getAllCommitmentsFromStorage().filter(c => c.userId !== userId);
+        const mergedComs = [...otherComs];
+        remoteComs.forEach(rc => {
+          const idx = mergedComs.findIndex(c => c.id === rc.id);
+          if (idx >= 0) mergedComs[idx] = rc;
+          else mergedComs.push(rc);
+        });
+        this.db.doc.commitments = mergedComs;
+        this.db.save();
+      } else {
+        const localComs = this.getCommitments();
+        for (const c of localComs) {
+          await this.syncCommitmentToFirebase(c);
+        }
+      }
+    } catch (err) {
+      console.warn('Error descargando datos desde Firestore:', err);
+    }
+  }
+
+  setupRealtimeSync(userId) {
+    if (!this.isFirebaseReady || !this.firestore || !userId) return;
+    if (this.unsubscribeShifts) this.unsubscribeShifts();
+    if (this.unsubscribeCommitments) this.unsubscribeCommitments();
+
+    try {
+      this.unsubscribeShifts = this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('shifts')
+        .onSnapshot(snapshot => {
+          let changed = false;
+          snapshot.docChanges().forEach(change => {
+            const shift = change.doc.data();
+            if (change.type === 'added' || change.type === 'modified') {
+              const exists = this.db.findOne('shifts', s => s.id === shift.id);
+              if (exists) {
+                this.db.update('shifts', shift.id, shift);
+              } else {
+                this.db.insert('shifts', shift);
+              }
+              changed = true;
+            } else if (change.type === 'removed') {
+              this.db.remove('shifts', change.doc.id);
+              changed = true;
+            }
+          });
+          if (changed && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('antiturno-data-synced'));
+          }
+        }, err => console.warn('Snapshot shifts error:', err));
+
+      this.unsubscribeCommitments = this.firestore
+        .collection('users')
+        .doc(userId)
+        .collection('commitments')
+        .onSnapshot(snapshot => {
+          let changed = false;
+          snapshot.docChanges().forEach(change => {
+            const com = change.doc.data();
+            if (change.type === 'added' || change.type === 'modified') {
+              const exists = this.db.findOne('commitments', c => c.id === com.id);
+              if (exists) {
+                this.db.update('commitments', com.id, com);
+              } else {
+                this.db.insert('commitments', com);
+              }
+              changed = true;
+            } else if (change.type === 'removed') {
+              this.db.remove('commitments', change.doc.id);
+              changed = true;
+            }
+          });
+          if (changed && typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('antiturno-data-synced'));
+          }
+        }, err => console.warn('Snapshot commitments error:', err));
+    } catch (e) {
+      console.warn('Error setting up realtime sync:', e);
+    }
+  }
+
+  async syncShiftToFirebase(shift) {
+    if (!this.isFirebaseReady || !this.firestore || !this.currentUser || !shift) return;
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(this.currentUser.id)
+        .collection('shifts')
+        .doc(shift.id)
+        .set(shift, { merge: true });
+    } catch (e) {
+      console.warn('Error guardando turno en Firestore:', e);
+    }
+  }
+
+  async deleteShiftFromFirebase(shiftId) {
+    if (!this.isFirebaseReady || !this.firestore || !this.currentUser || !shiftId) return;
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(this.currentUser.id)
+        .collection('shifts')
+        .doc(shiftId)
+        .delete();
+    } catch (e) {
+      console.warn('Error eliminando turno de Firestore:', e);
+    }
+  }
+
+  async syncCommitmentToFirebase(com) {
+    if (!this.isFirebaseReady || !this.firestore || !this.currentUser || !com) return;
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(this.currentUser.id)
+        .collection('commitments')
+        .doc(com.id)
+        .set(com, { merge: true });
+    } catch (e) {
+      console.warn('Error guardando compromiso en Firestore:', e);
+    }
+  }
+
+  async deleteCommitmentFromFirebase(comId) {
+    if (!this.isFirebaseReady || !this.firestore || !this.currentUser || !comId) return;
+    try {
+      await this.firestore
+        .collection('users')
+        .doc(this.currentUser.id)
+        .collection('commitments')
+        .doc(comId)
+        .delete();
+    } catch (e) {
+      console.warn('Error eliminando compromiso de Firestore:', e);
+    }
   }
 
   // ==========================================
@@ -210,6 +434,17 @@ class AuthDBService {
       throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
     }
 
+    if (this.isFirebaseReady && this.firestore) {
+      try {
+        const remoteDoc = await this.firestore.collection('users').doc(cleanEmail).get();
+        if (remoteDoc.exists) {
+          throw new Error('Ya existe una cuenta registrada con este correo electrónico.');
+        }
+      } catch (e) {
+        if (e.message.includes('Ya existe')) throw e;
+      }
+    }
+
     const salt = this.generateSalt();
     const hash = await this.hashPassword(password, salt);
     const now = new Date().toISOString();
@@ -226,9 +461,13 @@ class AuthDBService {
     };
 
     this.db.insert('users', newUser);
+    await this.syncUserToFirebase(newUser);
 
     this.handleRememberEmail(cleanEmail, rememberEmail);
     this.createSession(newUser, rememberMe);
+    if (this.isFirebaseReady) {
+      this.setupRealtimeSync(newUser.id);
+    }
     return this.sanitizeUser(newUser);
   }
 
@@ -238,9 +477,23 @@ class AuthDBService {
       throw new Error('Por favor ingresa correo y contraseña.');
     }
 
-    const user = this.findUserByEmail(cleanEmail);
+    let user = this.findUserByEmail(cleanEmail);
+
+    // Si no está en este dispositivo, buscar la cuenta en la nube (Firebase Firestore)
+    if (!user && this.isFirebaseReady && this.firestore) {
+      try {
+        const remoteDoc = await this.firestore.collection('users').doc(cleanEmail).get();
+        if (remoteDoc.exists) {
+          user = remoteDoc.data();
+          this.db.insert('users', user);
+        }
+      } catch (e) {
+        console.warn('Error consultando usuario en Firebase:', e);
+      }
+    }
+
     if (!user) {
-      throw new Error('No existe ninguna cuenta con este correo en este dispositivo. Si la creaste en otro equipo, importa tu copia de seguridad (.json).');
+      throw new Error('No existe ninguna cuenta con este correo electrónico.');
     }
 
     const inputHash = await this.hashPassword(password, user.salt);
@@ -250,6 +503,16 @@ class AuthDBService {
 
     this.handleRememberEmail(cleanEmail, rememberEmail);
     this.createSession(user, rememberMe);
+
+    // Sincronizar automáticamente turnos y compromisos desde la nube
+    if (this.isFirebaseReady) {
+      await this.pullUserDataFromFirebase(user.id);
+      this.setupRealtimeSync(user.id);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('antiturno-data-synced'));
+      }
+    }
+
     return this.sanitizeUser(user);
   }
 
@@ -443,6 +706,7 @@ class AuthDBService {
         throw new Error('El turno que intentas modificar no existe o no te pertenece.');
       }
       const updated = this.db.update('shifts', shiftData.id, fields);
+      if (this.isFirebaseReady) this.syncShiftToFirebase({ ...existing, ...fields });
       try {
         if (typeof window !== 'undefined' && window.dispatchEvent) {
           window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {
@@ -460,6 +724,7 @@ class AuthDBService {
       createdAt: now
     };
     const inserted = this.db.insert('shifts', savedShift);
+    if (this.isFirebaseReady) this.syncShiftToFirebase(savedShift);
     try {
       if (typeof window !== 'undefined' && window.dispatchEvent) {
         window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {
@@ -480,6 +745,7 @@ class AuthDBService {
       throw new Error('El turno no existe o no pertenece a tu cuenta.');
     }
     const deleted = this.db.remove('shifts', shiftId);
+    if (this.isFirebaseReady) this.deleteShiftFromFirebase(shiftId);
     try {
       if (typeof window !== 'undefined' && window.dispatchEvent) {
         window.dispatchEvent(new CustomEvent('antiturno-shift-changed', {

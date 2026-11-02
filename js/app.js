@@ -255,6 +255,15 @@ function updateAuthUI() {
   const profileContainer = document.getElementById('userProfileArea');
   if (!profileContainer) return;
 
+  const headerBadge = document.getElementById('headerHospitalBadge');
+  if (headerBadge) {
+    if (AuthDB.isFirebaseReady) {
+      headerBadge.innerText = 'AntiTurno • Nube Activa (Firebase)';
+    } else {
+      headerBadge.innerText = 'AntiTurno • Gestión Clínica';
+    }
+  }
+
   if (user) {
     const initials = user.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
     profileContainer.innerHTML = `
@@ -274,6 +283,10 @@ function updateAuthUI() {
           <div class="p-3 border-b border-outline-variant/30">
             <p class="font-title-md text-title-md text-on-surface font-bold truncate">${escapeHTML(user.name)}</p>
             <p class="font-body-sm text-body-sm text-on-surface-variant truncate">${escapeHTML(user.email)}</p>
+            ${AuthDB.isFirebaseReady
+              ? '<div class="mt-2 px-2.5 py-1 text-[10px] font-bold text-emerald-800 bg-emerald-50 rounded-lg flex items-center gap-1.5 border border-emerald-200"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span><span>Nube Sincronizada (Firebase)</span></div>'
+              : '<div class="mt-2 px-2.5 py-1 text-[10px] font-bold text-stone-700 bg-stone-100 rounded-lg flex items-center gap-1.5 border border-stone-200"><span class="w-2 h-2 rounded-full bg-stone-400"></span><span>Modo Local (JSON)</span></div>'
+            }
           </div>
           <div class="py-1">
             <button onclick="openSyncModal()" class="w-full flex items-center gap-2.5 px-3 py-2 text-left text-on-surface hover:bg-surface-container rounded-xl text-sm font-medium transition-colors" type="button">
