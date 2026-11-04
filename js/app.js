@@ -1182,7 +1182,7 @@ function renderCalendar() {
   for (let i = startDayOfWeek - 1; i >= 0; i--) {
     const dayNum = prevMonthLastDay - i;
     html += `
-      <div class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl bg-surface-container-lowest/40 opacity-40 flex flex-col justify-between border border-outline-variant/10">
+      <div class="min-h-[75px] sm:min-h-[120px] p-1 sm:p-2 rounded-lg sm:rounded-xl bg-surface-container-lowest/40 opacity-40 flex flex-col justify-between border border-outline-variant/10">
         <span class="font-label-md text-label-md font-semibold text-on-surface-variant">${dayNum}</span>
       </div>
     `;
@@ -1238,13 +1238,13 @@ function renderCalendar() {
       const st = SHIFT_TYPES[s.type] || SHIFT_TYPES.M;
       const compactTime = s.type === 'G' ? '24h' : `${s.startTime.slice(0, 2)}–${s.endTime.slice(0, 2)}`;
       badgesHtml += `
-        <div class="${st.badgeClass} px-1.5 py-1 rounded-lg flex items-center justify-between text-[11px] font-bold shadow-xs truncate" title="${escapeHTML(st.label)} (${s.startTime}-${s.endTime})">
-          <span class="flex items-center gap-1 truncate">
-            <span class="material-symbols-outlined text-[13px] shrink-0">${st.icon}</span>
+        <div class="${st.badgeClass} px-1 sm:px-1.5 py-0.5 sm:py-1 rounded-md sm:rounded-lg flex items-center justify-between text-[10px] sm:text-[11px] font-bold shadow-xs truncate" title="${escapeHTML(st.label)} (${s.startTime}-${s.endTime})">
+          <span class="flex items-center gap-0.5 sm:gap-1 truncate">
+            <span class="material-symbols-outlined text-[12px] sm:text-[13px] shrink-0">${st.icon}</span>
             <span class="font-extrabold">${st.short}</span>
-            <span class="truncate hidden sm:inline text-[10px] font-normal opacity-90">${st.label}</span>
+            <span class="truncate hidden md:inline text-[10px] font-normal opacity-90">${st.label}</span>
           </span>
-          <span class="text-[10px] font-mono shrink-0 ml-1 opacity-90 font-semibold">${compactTime}</span>
+          <span class="text-[9px] sm:text-[10px] font-mono shrink-0 ml-0.5 hidden sm:inline opacity-90 font-semibold">${compactTime}</span>
         </div>
       `;
     });
@@ -1252,7 +1252,7 @@ function renderCalendar() {
     // Indicador visual de descanso post-noche/post-guardia
     if (isPostGuardiaRest) {
       badgesHtml += `
-        <div class="${REST_TYPE.badgeClass} px-1.5 py-0.5 rounded-lg flex items-center gap-1 text-[10px] font-bold truncate shadow-xs" title="Día de descanso recomendado tras guardia de noche o 24h">
+        <div class="${REST_TYPE.badgeClass} px-1 sm:px-1.5 py-0.5 rounded-md sm:rounded-lg flex items-center gap-0.5 sm:gap-1 text-[9px] sm:text-[10px] font-bold truncate shadow-xs" title="Día de descanso recomendado tras guardia de noche o 24h">
           <span class="material-symbols-outlined text-[12px] shrink-0">${REST_TYPE.icon}</span>
           <span class="truncate">Descanso</span>
         </div>
@@ -1268,7 +1268,7 @@ function renderCalendar() {
       visibleComs.forEach(c => {
         const meta = COMMITMENT_CATEGORIES[c.category] || COMMITMENT_CATEGORIES.otro;
         badgesHtml += `
-          <div class="flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-container-lowest/90 border border-outline-variant/30 text-[10px] text-on-surface font-medium truncate shadow-2xs" title="${escapeHTML(c.title)} (${c.startTime})">
+          <div class="flex items-center gap-1 px-1 sm:px-1.5 py-0.5 rounded bg-surface-container-lowest/90 border border-outline-variant/30 text-[9px] sm:text-[10px] text-on-surface font-medium truncate shadow-2xs" title="${escapeHTML(c.title)} (${c.startTime})">
             <span class="w-1.5 h-1.5 rounded-full shrink-0 ${meta.dot || 'bg-primary'}"></span>
             <span class="truncate">${escapeHTML(c.title)}</span>
           </div>
@@ -1291,7 +1291,7 @@ function renderCalendar() {
            role="button"
            tabindex="0"
            aria-label="${escapeHTML(ariaLabel)}"
-           class="min-h-[105px] sm:min-h-[120px] p-2 rounded-xl ${cellBgClass} hover:bg-surface-container transition-all cursor-pointer flex flex-col justify-between border ${cellBorderClass} ${filterClass} focus-visible:ring-2 focus-visible:ring-primary focus:outline-none">
+           class="min-h-[75px] sm:min-h-[120px] p-1 sm:p-2 rounded-lg sm:rounded-xl ${cellBgClass} hover:bg-surface-container transition-all cursor-pointer flex flex-col justify-between border ${cellBorderClass} ${filterClass} focus-visible:ring-2 focus-visible:ring-primary focus:outline-none">
         <div class="flex items-center justify-between">
           <span class="font-label-md text-label-md font-bold ${isToday ? 'text-primary' : (isWeekend ? 'text-primary/80 font-bold' : 'text-on-surface')}">${day}</span>
           ${isToday ? '<span class="px-1.5 py-0.5 rounded-full bg-primary text-on-primary text-[9px] font-bold uppercase tracking-wider">Hoy</span>' : ''}
@@ -1624,7 +1624,7 @@ function renderHeroCard() {
   if (!user) {
     heroContainer.className = 'relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border border-outline-variant/30';
     heroContainer.innerHTML = `
-      <div class="relative p-6 flex items-center justify-between gap-4">
+      <div class="relative p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div class="flex items-center gap-4">
           <div class="w-14 h-14 rounded-2xl bg-surface-container flex items-center justify-center text-on-surface-variant shrink-0">
             <span class="material-symbols-outlined text-3xl">clinical_notes</span>
@@ -1647,7 +1647,7 @@ function renderHeroCard() {
   if (!nextShift) {
     heroContainer.className = `relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border ${REST_TYPE.borderClass} bg-gradient-to-br ${REST_TYPE.heroGradient}`;
     heroContainer.innerHTML = `
-      <div class="relative p-6 lg:p-8 flex items-center justify-between gap-4">
+      <div class="relative p-5 sm:p-6 lg:p-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div class="flex items-center gap-4">
           <div class="w-14 h-14 rounded-2xl ${REST_TYPE.badgeClass} flex items-center justify-center shrink-0 shadow-sm">
             <span class="material-symbols-outlined text-3xl">${REST_TYPE.icon}</span>
@@ -1689,7 +1689,7 @@ function renderHeroCard() {
   heroContainer.className = `relative overflow-hidden rounded-2xl bg-surface-container-lowest shadow-sm border ${st.heroBorder} bg-gradient-to-br ${st.heroGradient}`;
 
   heroContainer.innerHTML = `
-    <div class="relative p-6 lg:p-8 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-6">
+    <div class="relative p-5 sm:p-6 lg:p-8 flex flex-col xl:flex-row items-stretch xl:items-center justify-between gap-4 sm:gap-6">
       <div class="flex flex-col sm:flex-row items-start sm:items-center gap-5 min-w-0">
         <div class="w-16 h-16 rounded-2xl ${st.badgeClass} flex items-center justify-center shrink-0 shadow-md">
           <span class="material-symbols-outlined text-3xl">${st.icon}</span>
@@ -1713,7 +1713,7 @@ function renderHeroCard() {
           </p>
         </div>
       </div>
-      <div class="flex flex-wrap sm:flex-nowrap items-center gap-4 shrink-0">
+      <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0 w-full sm:w-auto">
         <div class="bg-surface-container-lowest/90 border border-outline-variant/30 px-5 py-3 rounded-xl flex items-center gap-3 shadow-2xs">
           <span class="material-symbols-outlined text-primary text-2xl">timer</span>
           <div class="flex flex-col">
