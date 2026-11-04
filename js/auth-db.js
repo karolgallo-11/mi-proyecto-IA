@@ -93,6 +93,7 @@ class AuthDBService {
         updatedAt: user.updatedAt || user.createdAt
       };
       await this.firestore.collection('users').doc(user.email).set(safeDoc, { merge: true });
+      await this.firestore.collection('users').doc(user.id).set(safeDoc, { merge: true });
     } catch (e) {
       console.warn('Error sincronizando usuario a Firebase:', e);
     }
